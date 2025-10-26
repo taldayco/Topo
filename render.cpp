@@ -2,7 +2,6 @@
 #include <algorithm>
 #include <vector>
 
-// Fast line drawing - direct pixel writes, no Bresenham overhead
 static void draw_line_fast(std::vector<uint32_t> &pixels, int width, int height,
                            float x0, float y0, float x1, float y1,
                            uint32_t color) {
@@ -29,44 +28,63 @@ static void draw_line_fast(std::vector<uint32_t> &pixels, int width, int height,
 TextureHandle create_texture_from_heightmap(SDL_GPUDevice *device,
                                             std::span<const float> heightmap,
                                             std::span<const Line> contour_lines,
-                                            int width, int height) {
+                                            int width, int height,
+                                            bool use_isometric) {
   auto start = SDL_GetTicks();
 
+  std::vector<uint32_t> pixels;
+  int tex_width, tex_height;
+
+  if (use_isometric) {
+    IsometricParams params;
+    params.tile_width = 2.0f;
+    params.tile_height = 1.0f;
+    params.height_scale = 100.0f;
+
+    IsometricView iso_view = create_isometric_heightmap(
+        heightmap, contour_lines, width, height, params);
+    pixels = std::move(iso_view.pixels);
+    tex_width = iso_view.width;
+    tex_height = iso_view.height;
+
+    SDL_Log("Isometric view: %dx%d", tex_width, tex_height);
+  } else {
+    // 2D orthographic view
+    tex_width = width;
+    tex_height = height;
+    pixels.resize(tex_width * tex_height);
+
+    for (int i = 0; i < width * height; ++i) {
+      uint8_t gray = (uint8_t)(heightmap[i] * 255.0f);
+      pixels[i] = 0xFF000000 | (gray << 16) | (gray << 8) | gray;
+    }
+
+    uint32_t line_color = 0xFF000000;
+    for (const auto &line : contour_lines) {
+      draw_line_fast(pixels, tex_width, tex_height, line.x1, line.y1, line.x2,
+                     line.y2, line_color);
+    }
+  }
+
+  auto after_render = SDL_GetTicks();
+  SDL_Log("Rendering: %llu ms for %zu lines", after_render - start,
+          contour_lines.size());
+
+  // Upload to GPU
   SDL_GPUTextureCreateInfo tex_info = {};
   tex_info.type = SDL_GPU_TEXTURETYPE_2D;
   tex_info.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-  tex_info.width = width;
-  tex_info.height = height;
+  tex_info.width = tex_width;
+  tex_info.height = tex_height;
   tex_info.layer_count_or_depth = 1;
   tex_info.num_levels = 1;
   tex_info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
 
   SDL_GPUTexture *texture = SDL_CreateGPUTexture(device, &tex_info);
 
-  // Create heightmap pixels
-  std::vector<uint32_t> pixels(width * height);
-  for (int i = 0; i < width * height; ++i) {
-    uint8_t gray = (uint8_t)(heightmap[i] * 255.0f);
-    pixels[i] = 0xFF000000 | (gray << 16) | (gray << 8) | gray;
-  }
-
-  auto after_heightmap = SDL_GetTicks();
-
-  // Draw contour lines (black)
-  uint32_t line_color = 0xFF000000;
-  for (const auto &line : contour_lines) {
-    draw_line_fast(pixels, width, height, line.x1, line.y1, line.x2, line.y2,
-                   line_color);
-  }
-
-  auto after_lines = SDL_GetTicks();
-  SDL_Log("Line drawing: %llu ms for %zu lines", after_lines - after_heightmap,
-          contour_lines.size());
-
-  // Upload to GPU
   SDL_GPUTransferBufferCreateInfo transfer_info = {};
   transfer_info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-  transfer_info.size = width * height * 4;
+  transfer_info.size = tex_width * tex_height * 4;
 
   SDL_GPUTransferBuffer *transfer =
       SDL_CreateGPUTransferBuffer(device, &transfer_info);
@@ -83,8 +101,8 @@ TextureHandle create_texture_from_heightmap(SDL_GPUDevice *device,
 
   SDL_GPUTextureRegion dst_region = {};
   dst_region.texture = texture;
-  dst_region.w = width;
-  dst_region.h = height;
+  dst_region.w = tex_width;
+  dst_region.h = tex_height;
   dst_region.d = 1;
 
   SDL_UploadToGPUTexture(copy_pass, &src_info, &dst_region, false);
@@ -103,12 +121,11 @@ TextureHandle create_texture_from_heightmap(SDL_GPUDevice *device,
 
   SDL_GPUSampler *sampler = SDL_CreateGPUSampler(device, &sampler_info);
 
-  auto end = SDL_GetTicks();
-  SDL_Log("Total texture creation: %llu ms", end - start);
-
   TextureHandle handle;
   handle.texture = texture;
   handle.sampler = sampler;
+  handle.width = tex_width;
+  handle.height = tex_height;
 
   return handle;
 }

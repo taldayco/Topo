@@ -24,6 +24,7 @@ add_executable(topogen
     noise.cpp
     contour.cpp
     render.cpp
+    isometric.cpp
 )
 
 target_link_libraries(topogen PRIVATE SDL3::SDL3 imgui)

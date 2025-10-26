@@ -18,8 +18,9 @@ static TextureHandle map_texture = {};
 static std::vector<float> heightmap;
 static std::vector<Line> contour_lines;
 static NoiseParams noise_params = {0.005f, 6, 2.0f, 0.5f, 1337};
-static float contour_interval = 0.1f;
+static float contour_interval = 0.05f;
 static bool need_regenerate = true;
+static bool use_isometric = false;
 
 bool init() {
   SDL_Log("Init starting...");
@@ -87,8 +88,9 @@ void regenerate_map() {
   }
 
   SDL_Log("Creating texture with lines...");
-  map_texture = create_texture_from_heightmap(
-      gpu_device, heightmap, contour_lines, MAP_WIDTH, MAP_HEIGHT);
+  map_texture =
+      create_texture_from_heightmap(gpu_device, heightmap, contour_lines,
+                                    MAP_WIDTH, MAP_HEIGHT, use_isometric);
   SDL_Log("Texture created");
 
   SDL_WaitForGPUIdle(gpu_device);
@@ -145,10 +147,11 @@ void render_ui() {
   ImGui::Text("Contour Lines");
   need_regenerate |=
       ImGui::SliderFloat("Interval", &contour_interval, 0.05f, 0.2f);
-
   ImGui::Separator();
   if (ImGui::Button("Regenerate", {-1, 40}))
     need_regenerate = true;
+  ImGui::Separator();
+  need_regenerate |= ImGui::Checkbox("Isometric View", &use_isometric);
   ImGui::Text("Lines: %zu", contour_lines.size());
   ImGui::Text("Resolution: %dx%d", MAP_WIDTH, MAP_HEIGHT);
 
