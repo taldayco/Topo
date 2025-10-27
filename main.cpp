@@ -11,16 +11,20 @@ constexpr int MAP_WIDTH = 512;
 constexpr int MAP_HEIGHT = 512;
 constexpr int WINDOW_WIDTH = 1400;
 constexpr int WINDOW_HEIGHT = 1024;
+// Default parameters
+constexpr NoiseParams DEFAULT_NOISE = {0.003f, 6, 2.0f, 0.5f, 1337};
+constexpr float DEFAULT_CONTOUR_INTERVAL = 0.05f;
+constexpr bool DEFAULT_ISOMETRIC = false;
 
 static SDL_Window *window = nullptr;
 static SDL_GPUDevice *gpu_device = nullptr;
 static TextureHandle map_texture = {};
 static std::vector<float> heightmap;
 static std::vector<Line> contour_lines;
-static NoiseParams noise_params = {0.005f, 6, 2.0f, 0.5f, 1337};
-static float contour_interval = 0.05f;
+static NoiseParams noise_params = DEFAULT_NOISE;
+static float contour_interval = DEFAULT_CONTOUR_INTERVAL;
+static bool use_isometric = DEFAULT_ISOMETRIC;
 static bool need_regenerate = true;
-static bool use_isometric = false;
 
 bool init() {
   SDL_Log("Init starting...");
@@ -148,8 +152,15 @@ void render_ui() {
   need_regenerate |=
       ImGui::SliderFloat("Interval", &contour_interval, 0.05f, 0.2f);
   ImGui::Separator();
-  if (ImGui::Button("Regenerate", {-1, 40}))
+  if (ImGui::Button("Regenerate", {175, 40}))
     need_regenerate = true;
+  ImGui::SameLine();
+  if (ImGui::Button("Reset", {175, 40})) {
+    noise_params = DEFAULT_NOISE;
+    contour_interval = DEFAULT_CONTOUR_INTERVAL;
+    use_isometric = DEFAULT_ISOMETRIC;
+    need_regenerate = true;
+  }
   ImGui::Separator();
   need_regenerate |= ImGui::Checkbox("Isometric View", &use_isometric);
   ImGui::Text("Lines: %zu", contour_lines.size());
