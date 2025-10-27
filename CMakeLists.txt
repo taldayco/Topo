@@ -25,6 +25,7 @@ add_executable(topogen
     contour.cpp
     render.cpp
     isometric.cpp
+    detail.cpp
 )
 
 target_link_libraries(topogen PRIVATE SDL3::SDL3 imgui)

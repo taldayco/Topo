@@ -5,7 +5,7 @@ void extract_contours(std::span<const float> heightmap, int width, int height,
   out_lines.clear();
 
   // Extract each elevation level
-  for (float level = interval; level < 1.0f; level += interval) {
+  for (float level = interval * 0.5f; level < 1.0f; level += interval) {
     // Marching squares with linear interpolation
     for (int y = 0; y < height - 1; ++y) {
       for (int x = 0; x < width - 1; ++x) {

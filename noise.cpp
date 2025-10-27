@@ -78,4 +78,9 @@ void generate_heightmap(std::span<float> out, int width, int height,
   for (int i = 0; i < width * height; ++i) {
     out[i] = (out[i] / max_value + 1.0f) * 0.5f;
   }
+  constexpr int TERRACE_LEVELS = 8; // Fewer = more brutalist
+  for (int i = 0; i < width * height; ++i) {
+    float level = std::floor(out[i] * TERRACE_LEVELS) / TERRACE_LEVELS;
+    out[i] = level;
+  }
 }

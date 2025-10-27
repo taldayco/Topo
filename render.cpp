@@ -1,8 +1,9 @@
 #include "render.h"
+#include "detail.h"
 #include <algorithm>
 #include <vector>
 
-static void draw_line_fast(std::vector<uint32_t> &pixels, int width, int height,
+static void draw_line_soft(std::vector<uint32_t> &pixels, int width, int height,
                            float x0, float y0, float x1, float y1,
                            uint32_t color) {
   float dx = x1 - x0;
@@ -15,23 +16,39 @@ static void draw_line_fast(std::vector<uint32_t> &pixels, int width, int height,
   float step_x = dx / len;
   float step_y = dy / len;
 
+  uint8_t alpha = (color >> 24) & 0xFF;
+  uint8_t r = (color >> 16) & 0xFF;
+  uint8_t g = (color >> 8) & 0xFF;
+  uint8_t b = color & 0xFF;
+
   for (int i = 0; i <= (int)len; ++i) {
     int x = (int)(x0 + step_x * i);
     int y = (int)(y0 + step_y * i);
 
     if (x >= 0 && x < width && y >= 0 && y < height) {
-      pixels[y * width + x] = color;
+      // Alpha blend with existing pixel
+      uint32_t dst = pixels[y * width + x];
+      uint8_t dst_r = (dst >> 16) & 0xFF;
+      uint8_t dst_g = (dst >> 8) & 0xFF;
+      uint8_t dst_b = dst & 0xFF;
+
+      float blend = alpha / 255.0f;
+      uint8_t out_r = r * blend + dst_r * (1.0f - blend);
+      uint8_t out_g = g * blend + dst_g * (1.0f - blend);
+      uint8_t out_b = b * blend + dst_b * (1.0f - blend);
+
+      pixels[y * width + x] = 0xFF000000 | (out_r << 16) | (out_g << 8) | out_b;
     }
   }
 }
 
-TextureHandle create_texture_from_heightmap(SDL_GPUDevice *device,
-                                            std::span<const float> heightmap,
-                                            std::span<const Line> contour_lines,
-                                            int width, int height,
-                                            bool use_isometric) {
-  auto start = SDL_GetTicks();
+TextureHandle create_texture_from_heightmap(
+    SDL_GPUDevice *device, std::span<const float> heightmap,
+    std::span<const Line> contour_lines, int width, int height,
+    bool use_isometric, const Palette &palette,
+    const DetailParams &detail_params, float contour_opacity) {
 
+  auto start = SDL_GetTicks();
   std::vector<uint32_t> pixels;
   int tex_width, tex_height;
 
@@ -42,7 +59,7 @@ TextureHandle create_texture_from_heightmap(SDL_GPUDevice *device,
     params.height_scale = 100.0f;
 
     IsometricView iso_view = create_isometric_heightmap(
-        heightmap, contour_lines, width, height, params);
+        heightmap, contour_lines, width, height, params, palette);
     pixels = std::move(iso_view.pixels);
     tex_width = iso_view.width;
     tex_height = iso_view.height;
@@ -54,14 +71,22 @@ TextureHandle create_texture_from_heightmap(SDL_GPUDevice *device,
     tex_height = height;
     pixels.resize(tex_width * tex_height);
 
-    for (int i = 0; i < width * height; ++i) {
-      uint8_t gray = (uint8_t)(heightmap[i] * 255.0f);
-      pixels[i] = 0xFF000000 | (gray << 16) | (gray << 8) | gray;
+    // STEP 1: Base color pass
+    for (int y = 0; y < height; ++y) {
+      for (int x = 0; x < width; ++x) {
+        int i = y * width + x;
+        pixels[i] = organic_color(heightmap[i], x, y, palette);
+      }
     }
 
-    uint32_t line_color = 0xFF000000;
+    // STEP 2: Add procedural details (rocks, moss, grass)
+    add_procedural_details(pixels, heightmap, width, height, palette,
+                           detail_params);
+
+    // STEP 3: Draw contour lines on top
+    uint32_t line_color = ((uint8_t)(contour_opacity * 255) << 24) | 0x00FFFFFF;
     for (const auto &line : contour_lines) {
-      draw_line_fast(pixels, tex_width, tex_height, line.x1, line.y1, line.x2,
+      draw_line_soft(pixels, tex_width, tex_height, line.x1, line.y1, line.x2,
                      line.y2, line_color);
     }
   }

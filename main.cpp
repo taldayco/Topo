@@ -1,5 +1,7 @@
 #include "contour.h"
+#include "detail.h"
 #include "noise.h"
+#include "palettes.h"
 #include "render.h"
 #include <SDL3/SDL.h>
 #include <imgui.h>
@@ -12,9 +14,9 @@ constexpr int MAP_HEIGHT = 512;
 constexpr int WINDOW_WIDTH = 1400;
 constexpr int WINDOW_HEIGHT = 1024;
 // Default parameters
-constexpr NoiseParams DEFAULT_NOISE = {0.003f, 6, 2.0f, 0.5f, 1337};
+constexpr NoiseParams DEFAULT_NOISE = {0.003f, 6, 2.0f, 0.5f, 1337, 8};
 constexpr float DEFAULT_CONTOUR_INTERVAL = 0.05f;
-constexpr bool DEFAULT_ISOMETRIC = false;
+constexpr bool DEFAULT_ISOMETRIC = true;
 
 static SDL_Window *window = nullptr;
 static SDL_GPUDevice *gpu_device = nullptr;
@@ -25,6 +27,9 @@ static NoiseParams noise_params = DEFAULT_NOISE;
 static float contour_interval = DEFAULT_CONTOUR_INTERVAL;
 static bool use_isometric = DEFAULT_ISOMETRIC;
 static bool need_regenerate = true;
+static int current_palette = 0;
+static float contour_opacity = 0.25f;
+static DetailParams detail_params = {true, true, true, false, 1.0f, 1.0f, 1.0f};
 
 bool init() {
   SDL_Log("Init starting...");
@@ -92,9 +97,9 @@ void regenerate_map() {
   }
 
   SDL_Log("Creating texture with lines...");
-  map_texture =
-      create_texture_from_heightmap(gpu_device, heightmap, contour_lines,
-                                    MAP_WIDTH, MAP_HEIGHT, use_isometric);
+  map_texture = create_texture_from_heightmap(
+      gpu_device, heightmap, contour_lines, MAP_WIDTH, MAP_HEIGHT,
+      use_isometric, PALETTES[current_palette], detail_params, contour_opacity);
   SDL_Log("Texture created");
 
   SDL_WaitForGPUIdle(gpu_device);
@@ -127,6 +132,7 @@ void render_ui() {
 
   if (map_texture.texture) {
     ImGui::Image((ImTextureID)map_texture.texture, {1024, 1024});
+
   } else {
     ImGui::Text("Generating...");
   }
@@ -146,11 +152,38 @@ void render_ui() {
       ImGui::SliderFloat("Lacunarity", &noise_params.lacunarity, 1.0f, 4.0f);
   need_regenerate |= ImGui::SliderFloat("Gain", &noise_params.gain, 0.1f, 1.0f);
   need_regenerate |= ImGui::SliderInt("Seed", &noise_params.seed, 0, 10000);
-
+  need_regenerate |=
+      ImGui::SliderInt("Terrace Levels", &noise_params.terrace_levels, 3, 20);
   ImGui::Separator();
   ImGui::Text("Contour Lines");
   need_regenerate |=
       ImGui::SliderFloat("Interval", &contour_interval, 0.05f, 0.2f);
+
+  ImGui::Separator();
+  ImGui::Text("Color Palette");
+  if (ImGui::BeginCombo("##palette", PALETTES[current_palette].name)) {
+    for (int i = 0; i < PALETTE_COUNT; ++i) {
+      bool is_selected = (current_palette == i);
+      if (ImGui::Selectable(PALETTES[i].name, is_selected)) {
+        current_palette = i;
+        need_regenerate = true;
+      }
+      if (is_selected)
+        ImGui::SetItemDefaultFocus();
+    }
+    ImGui::EndCombo();
+  }
+
+  ImGui::Separator();
+  ImGui::Text("Terrain Details");
+  need_regenerate |= ImGui::Checkbox("Rocks", &detail_params.enable_rocks);
+  need_regenerate |= ImGui::Checkbox("Moss", &detail_params.enable_moss);
+  need_regenerate |= ImGui::Checkbox("Grass", &detail_params.enable_grass);
+  need_regenerate |=
+      ImGui::Checkbox("Hatching", &detail_params.enable_hatching);
+  ImGui::Separator();
+  need_regenerate |= ImGui::Checkbox("Isometric View", &use_isometric);
+
   ImGui::Separator();
   if (ImGui::Button("Regenerate", {175, 40}))
     need_regenerate = true;
@@ -159,10 +192,12 @@ void render_ui() {
     noise_params = DEFAULT_NOISE;
     contour_interval = DEFAULT_CONTOUR_INTERVAL;
     use_isometric = DEFAULT_ISOMETRIC;
+    current_palette = 0;
     need_regenerate = true;
   }
+
   ImGui::Separator();
-  need_regenerate |= ImGui::Checkbox("Isometric View", &use_isometric);
+  ImGui::Text("Stats");
   ImGui::Text("Lines: %zu", contour_lines.size());
   ImGui::Text("Resolution: %dx%d", MAP_WIDTH, MAP_HEIGHT);
 

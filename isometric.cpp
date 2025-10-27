@@ -35,7 +35,8 @@ static void draw_line_iso(std::vector<uint32_t> &pixels, int width, int height,
 IsometricView create_isometric_heightmap(std::span<const float> heightmap,
                                          std::span<const Line> contour_lines,
                                          int map_width, int map_height,
-                                         const IsometricParams &params) {
+                                         const IsometricParams &params,
+                                         const Palette &palette) {
 
   // Calculate isometric view dimensions
   float min_x = 1e9f, max_x = -1e9f;
@@ -69,11 +70,11 @@ IsometricView create_isometric_heightmap(std::span<const float> heightmap,
   float offset_y = -min_y + 10;
 
   // Render heightmap pixels back-to-front
+
   for (int y = map_height - 1; y >= 0; --y) {
     for (int x = map_width - 1; x >= 0; --x) {
       float z = heightmap[y * map_width + x];
-      uint8_t gray = (uint8_t)(z * 255.0f);
-      uint32_t color = 0xFF000000 | (gray << 16) | (gray << 8) | gray;
+      uint32_t color = organic_color(z, x, y, palette);
 
       // Project quad corners
       float corners_x[4], corners_y[4];
@@ -105,7 +106,7 @@ IsometricView create_isometric_heightmap(std::span<const float> heightmap,
   }
 
   // Render contour lines
-  uint32_t line_color = 0xFF000000;
+  uint32_t line_color = palette.colors[5];
   for (const auto &line : contour_lines) {
     float z0 = heightmap[(int)line.y1 * map_width + (int)line.x1];
     float z1 = heightmap[(int)line.y2 * map_width + (int)line.x2];
