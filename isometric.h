@@ -25,4 +25,5 @@ IsometricView create_isometric_heightmap(std::span<const float> heightmap,
                                          std::span<const Line> contour_lines,
                                          int map_width, int map_height,
                                          const IsometricParams &params,
-                                         const Palette &palette);
+                                         const Palette &palette,
+                                         float contour_opacity);

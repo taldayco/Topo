@@ -1,6 +1,7 @@
 #include "render.h"
 #include "detail.h"
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 static void draw_line_soft(std::vector<uint32_t> &pixels, int width, int height,
@@ -8,7 +9,7 @@ static void draw_line_soft(std::vector<uint32_t> &pixels, int width, int height,
                            uint32_t color) {
   float dx = x1 - x0;
   float dy = y1 - y0;
-  float len = std::max(std::abs(dx), std::abs(dy));
+  float len = std::hypot(dx, dy);
 
   if (len < 1.0f)
     return;
@@ -22,22 +23,35 @@ static void draw_line_soft(std::vector<uint32_t> &pixels, int width, int height,
   uint8_t b = color & 0xFF;
 
   for (int i = 0; i <= (int)len; ++i) {
-    int x = (int)(x0 + step_x * i);
-    int y = (int)(y0 + step_y * i);
+    float fx = x0 + step_x * i;
+    float fy = y0 + step_y * i;
 
-    if (x >= 0 && x < width && y >= 0 && y < height) {
-      // Alpha blend with existing pixel
-      uint32_t dst = pixels[y * width + x];
-      uint8_t dst_r = (dst >> 16) & 0xFF;
-      uint8_t dst_g = (dst >> 8) & 0xFF;
-      uint8_t dst_b = dst & 0xFF;
+    // Draw 3x3 kernel for thickness and smoothness
+    for (int dy = -1; dy <= 1; ++dy) {
+      for (int dx = -1; dx <= 1; ++dx) {
+        int x = (int)(fx + dx);
+        int y = (int)(fy + dy);
 
-      float blend = alpha / 255.0f;
-      uint8_t out_r = r * blend + dst_r * (1.0f - blend);
-      uint8_t out_g = g * blend + dst_g * (1.0f - blend);
-      uint8_t out_b = b * blend + dst_b * (1.0f - blend);
+        if (x >= 0 && x < width && y >= 0 && y < height) {
+          // Distance-based falloff for anti-aliasing
+          float dist = std::hypot(dx, dy);
+          float falloff = std::max(0.0f, 1.0f - dist * 0.5f);
+          uint8_t aa_alpha = (uint8_t)(alpha * falloff);
 
-      pixels[y * width + x] = 0xFF000000 | (out_r << 16) | (out_g << 8) | out_b;
+          uint32_t dst = pixels[y * width + x];
+          uint8_t dst_r = (dst >> 16) & 0xFF;
+          uint8_t dst_g = (dst >> 8) & 0xFF;
+          uint8_t dst_b = dst & 0xFF;
+
+          float blend = aa_alpha / 255.0f;
+          uint8_t out_r = r * blend + dst_r * (1.0f - blend);
+          uint8_t out_g = g * blend + dst_g * (1.0f - blend);
+          uint8_t out_b = b * blend + dst_b * (1.0f - blend);
+
+          pixels[y * width + x] =
+              0xFF000000 | (out_r << 16) | (out_g << 8) | out_b;
+        }
+      }
     }
   }
 }
@@ -58,8 +72,9 @@ TextureHandle create_texture_from_heightmap(
     params.tile_height = 1.0f;
     params.height_scale = 100.0f;
 
-    IsometricView iso_view = create_isometric_heightmap(
-        heightmap, contour_lines, width, height, params, palette);
+    IsometricView iso_view =
+        create_isometric_heightmap(heightmap, contour_lines, width, height,
+                                   params, palette, contour_opacity);
     pixels = std::move(iso_view.pixels);
     tex_width = iso_view.width;
     tex_height = iso_view.height;
@@ -84,7 +99,9 @@ TextureHandle create_texture_from_heightmap(
                            detail_params);
 
     // STEP 3: Draw contour lines on top
-    uint32_t line_color = ((uint8_t)(contour_opacity * 255) << 24) | 0x00FFFFFF;
+    uint32_t base_line = palette.colors[5]; // Use palette line color
+    uint32_t line_color =
+        ((uint8_t)(contour_opacity * 255) << 24) | (base_line & 0x00FFFFFF);
     for (const auto &line : contour_lines) {
       draw_line_soft(pixels, tex_width, tex_height, line.x1, line.y1, line.x2,
                      line.y2, line_color);

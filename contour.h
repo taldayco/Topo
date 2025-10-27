@@ -5,6 +5,7 @@
 
 struct Line {
   float x1, y1, x2, y2;
+  float elevation;
 };
 
 void extract_contours(std::span<const float> heightmap, int width, int height,
