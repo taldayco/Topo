@@ -29,7 +29,7 @@ static bool use_isometric = DEFAULT_ISOMETRIC;
 static bool need_regenerate = true;
 static int current_palette = 0;
 static float contour_opacity = 0.25f;
-static DetailParams detail_params = {true, true, true, false, 1.0f, 1.0f, 1.0f};
+static DetailParams detail_params = {};
 
 bool init() {
   SDL_Log("Init starting...");
@@ -174,13 +174,6 @@ void render_ui() {
     ImGui::EndCombo();
   }
 
-  ImGui::Separator();
-  ImGui::Text("Terrain Details");
-  need_regenerate |= ImGui::Checkbox("Rocks", &detail_params.enable_rocks);
-  need_regenerate |= ImGui::Checkbox("Moss", &detail_params.enable_moss);
-  need_regenerate |= ImGui::Checkbox("Grass", &detail_params.enable_grass);
-  need_regenerate |=
-      ImGui::Checkbox("Hatching", &detail_params.enable_hatching);
   ImGui::Separator();
   need_regenerate |= ImGui::Checkbox("Isometric View", &use_isometric);
 

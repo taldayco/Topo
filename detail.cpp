@@ -14,89 +14,93 @@ static float get_slope(std::span<const float> heightmap, int x, int y,
   return std::sqrt(dx * dx + dy * dy);
 }
 
-static bool should_place_rock(float height, float slope, int x, int y,
-                              float density) {
-  if (slope < 0.15f)
-    return false;
-
-  uint32_t hash = (x * 73856093) ^ (y * 19349663);
-  float noise = (hash & 0xFF) / 255.0f;
-
-  return noise > (1.0f - slope * 2.0f * density);
+// Hexagonal grid coordinates
+static void hex_coords(int x, int y, float &hx, float &hy) {
+  const float HEX_SIZE = 8.0f;
+  hx = x * HEX_SIZE * 0.866f; // sqrt(3)/2
+  hy = y * HEX_SIZE - (x % 2) * HEX_SIZE * 0.5f;
 }
 
-static void draw_rock(std::vector<uint32_t> &pixels, int width, int height,
-                      int x, int y) {
-  uint32_t rock_color = 0xFF0A0A0A; // Much darker - almost black
+static float hex_distance(float x, float y, float hx, float hy) {
+  float dx = x - hx;
+  float dy = y - hy;
 
-  // 3x3 for visibility
-  for (int dy = -1; dy <= 1; ++dy) {
-    for (int dx = -1; dx <= 1; ++dx) {
-      int px = x + dx, py = y + dy;
-      if (px >= 0 && px < width && py >= 0 && py < height) {
-        pixels[py * width + px] = rock_color;
+  // Hexagonal distance approximation
+  float dist = std::abs(dx) * 0.866f + std::abs(dy) * 0.5f;
+  dist = std::max(dist, std::abs(dy));
+
+  return dist;
+}
+
+static void draw_basalt_columns(std::vector<uint32_t> &pixels,
+                                std::span<const float> heightmap, int width,
+                                int height, const Palette &palette) {
+  const float HEX_SIZE = 8.0f;
+
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      int idx = y * width + x;
+      float h = heightmap[idx];
+
+      // Find nearest hex center
+      int hx_grid = (int)(x / (HEX_SIZE * 0.866f));
+      int hy_grid = (int)(y / HEX_SIZE);
+
+      float min_dist = 1e9f;
+
+      // Check surrounding hex centers
+      for (int dy = -1; dy <= 1; ++dy) {
+        for (int dx = -1; dx <= 1; ++dx) {
+          float hx, hy;
+          hex_coords(hx_grid + dx, hy_grid + dy, hx, hy);
+          float dist = hex_distance(x, y, hx, hy);
+          min_dist = std::min(min_dist, dist);
+        }
+      }
+
+      // Darken edges of hexagons
+      uint32_t base = pixels[idx];
+      if (min_dist > HEX_SIZE - 1.5f) {
+        uint8_t r = (base >> 16) & 0xFF;
+        uint8_t g = (base >> 8) & 0xFF;
+        uint8_t b = base & 0xFF;
+
+        r *= 0.7f;
+        g *= 0.7f;
+        b *= 0.7f;
+
+        pixels[idx] = 0xFF000000 | (r << 16) | (g << 8) | b;
       }
     }
   }
 }
 
-static void draw_moss(std::vector<uint32_t> &pixels, int width, int height,
-                      int x, int y, float h, const Palette &palette) {
-  // Much brighter - 1.5x instead of 1.15x
-  uint32_t base = get_elevation_color_smooth(h, palette);
-  uint8_t r = std::min(255, (int)((base >> 16 & 0xFF) * 1.5f));
-  uint8_t g = std::min(255, (int)((base >> 8 & 0xFF) * 1.5f));
-  uint8_t b = std::min(255, (int)((base & 0xFF) * 1.5f));
+static void add_elevation_steps(std::vector<uint32_t> &pixels,
+                                std::span<const float> heightmap, int width,
+                                int height) {
+  for (int y = 1; y < height - 1; ++y) {
+    for (int x = 1; x < width - 1; ++x) {
+      int idx = y * width + x;
+      float h = heightmap[idx];
 
-  if (x >= 0 && x < width && y >= 0 && y < height) {
-    pixels[y * width + x] = 0xFF000000 | (r << 16) | (g << 8) | b;
-  }
-}
+      // Check for elevation drop (step edge)
+      float h_right = heightmap[y * width + (x + 1)];
+      float h_down = heightmap[(y + 1) * width + x];
 
-static void draw_grass(std::vector<uint32_t> &pixels, int width, int height,
-                       int x, int y) {
-  uint32_t grass_color = 0xFFB0B0B0; // Much brighter
+      bool is_edge = (h - h_right > 0.05f) || (h - h_down > 0.05f);
 
-  for (int i = 0; i < 3; ++i) {
-    int py = y - i;
-    if (py >= 0 && py < height) {
-      pixels[py * width + x] = grass_color;
-    }
-  }
-}
+      if (is_edge) {
+        uint32_t base = pixels[idx];
+        uint8_t r = (base >> 16) & 0xFF;
+        uint8_t g = (base >> 8) & 0xFF;
+        uint8_t b = base & 0xFF;
 
-// Also reduce density - currently placing on EVERY valid pixel
-static bool should_place_moss(float height, float slope, int x, int y,
-                              float density) {
-  if (height < 0.3f || height > 0.7f)
-    return false;
-  if (slope > 0.1f)
-    return false;
+        // Darken step edges significantly
+        r *= 0.4f;
+        g *= 0.4f;
+        b *= 0.4f;
 
-  uint32_t hash = (x * 19349663) ^ (y * 83492791);
-  return (hash & 0xFFF) < 100 * density; // Much sparser - ~2.4% coverage
-}
-
-static bool should_place_grass(float height, float slope, int x, int y,
-                               float density) {
-  if (height > 0.4f)
-    return false;
-  if (slope > 0.08f)
-    return false;
-
-  uint32_t hash = (x * 83492791) ^ (y * 73856093);
-  return (hash & 0xFFF) < 200 * density; // ~4.8% coverage
-}
-
-static void add_slope_hatching(std::vector<uint32_t> &pixels,
-                               std::span<const float> heightmap, int width,
-                               int height) {
-  for (int y = 0; y < height; ++y) {
-    for (int x = 0; x < width; ++x) {
-      float slope = get_slope(heightmap, x, y, width, height);
-
-      if (slope > 0.12f && (x + y) % 3 == 0) {
-        pixels[y * width + x] = 0xFF2A2A2A;
+        pixels[idx] = 0xFF000000 | (r << 16) | (g << 8) | b;
       }
     }
   }
@@ -106,30 +110,10 @@ void add_procedural_details(std::vector<uint32_t> &pixels,
                             std::span<const float> heightmap, int width,
                             int height, const Palette &palette,
                             const DetailParams &params) {
-  for (int y = 1; y < height - 1; ++y) {
-    for (int x = 1; x < width - 1; ++x) {
-      int idx = y * width + x;
-      float h = heightmap[idx];
-      float slope = get_slope(heightmap, x, y, width, height);
 
-      if (params.enable_grass &&
-          should_place_grass(h, slope, x, y, params.grass_density)) {
-        draw_grass(pixels, width, height, x, y);
-      }
+  // Add basalt column texture
+  draw_basalt_columns(pixels, heightmap, width, height, palette);
 
-      if (params.enable_moss &&
-          should_place_moss(h, slope, x, y, params.moss_density)) {
-        draw_moss(pixels, width, height, x, y, h, palette);
-      }
-
-      if (params.enable_rocks &&
-          should_place_rock(h, slope, x, y, params.rock_density)) {
-        draw_rock(pixels, width, height, x, y);
-      }
-    }
-  }
-
-  if (params.enable_hatching) {
-    add_slope_hatching(pixels, heightmap, width, height);
-  }
+  // Darken elevation step edges
+  add_elevation_steps(pixels, heightmap, width, height);
 }
