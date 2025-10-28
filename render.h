@@ -18,6 +18,7 @@ TextureHandle create_texture_from_heightmap(
     SDL_GPUDevice *device, std::span<const float> heightmap,
     std::span<const Line> contour_lines, int width, int height,
     bool use_isometric, const Palette &palette,
-    const DetailParams &detail_params, float contour_opacity);
+    const DetailParams &detail_params, float contour_opacity, float iso_padding,
+    float iso_offset_x_adjust, float iso_offset_y_adjust);
 
 void release_texture(SDL_GPUDevice *device, const TextureHandle &handle);

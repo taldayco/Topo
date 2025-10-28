@@ -17,7 +17,9 @@ constexpr int WINDOW_HEIGHT = 1024;
 constexpr NoiseParams DEFAULT_NOISE = {0.003f, 6, 2.0f, 0.5f, 1337, 8};
 constexpr float DEFAULT_CONTOUR_INTERVAL = 0.05f;
 constexpr bool DEFAULT_ISOMETRIC = true;
-
+static float iso_padding = 50.0f;
+static float iso_offset_x_adjust = 0.0f;
+static float iso_offset_y_adjust = 0.0f;
 static SDL_Window *window = nullptr;
 static SDL_GPUDevice *gpu_device = nullptr;
 static TextureHandle map_texture = {};
@@ -99,7 +101,8 @@ void regenerate_map() {
   SDL_Log("Creating texture with lines...");
   map_texture = create_texture_from_heightmap(
       gpu_device, heightmap, contour_lines, MAP_WIDTH, MAP_HEIGHT,
-      use_isometric, PALETTES[current_palette], detail_params, contour_opacity);
+      use_isometric, PALETTES[current_palette], detail_params, contour_opacity,
+      iso_padding, iso_offset_x_adjust, iso_offset_y_adjust);
   SDL_Log("Texture created");
 
   SDL_WaitForGPUIdle(gpu_device);
@@ -131,13 +134,29 @@ void render_ui() {
                    ImGuiWindowFlags_NoCollapse);
 
   if (map_texture.texture) {
-    ImGui::Image((ImTextureID)map_texture.texture, {1024, 1024});
+    // Scale texture to fit window while maintaining aspect ratio
+    float tex_w = map_texture.width;
+    float tex_h = map_texture.height;
+    float window_w = 1024.0f;
+    float window_h = 1024.0f;
 
+    float scale = std::min(window_w / tex_w, window_h / tex_h);
+    float display_w = tex_w * scale;
+    float display_h = tex_h * scale;
+
+    // Center the image
+    float offset_x = (window_w - display_w) * 0.5f;
+    float offset_y = (window_h - display_h) * 0.5f;
+
+    ImGui::SetCursorPos({offset_x, offset_y});
+    ImGui::Image((ImTextureID)map_texture.texture, {display_w, display_h});
   } else {
     ImGui::Text("Generating...");
   }
 
   ImGui::End();
+
+  // ... rest of function
 
   ImGui::SetNextWindowPos({1024, 0}, ImGuiCond_Always);
   ImGui::SetNextWindowSize({376, 1024}, ImGuiCond_Always);
@@ -178,7 +197,14 @@ void render_ui() {
 
   ImGui::Separator();
   need_regenerate |= ImGui::Checkbox("Isometric View", &use_isometric);
-
+  if (use_isometric) {
+    need_regenerate |=
+        ImGui::SliderFloat("Padding", &iso_padding, 0.0f, 200.0f);
+    need_regenerate |=
+        ImGui::SliderFloat("Offset X", &iso_offset_x_adjust, -200.0f, 200.0f);
+    need_regenerate |=
+        ImGui::SliderFloat("Offset Y", &iso_offset_y_adjust, -200.0f, 200.0f);
+  }
   ImGui::Separator();
   if (ImGui::Button("Regenerate", {175, 40}))
     need_regenerate = true;

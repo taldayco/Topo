@@ -60,7 +60,8 @@ TextureHandle create_texture_from_heightmap(
     SDL_GPUDevice *device, std::span<const float> heightmap,
     std::span<const Line> contour_lines, int width, int height,
     bool use_isometric, const Palette &palette,
-    const DetailParams &detail_params, float contour_opacity) {
+    const DetailParams &detail_params, float contour_opacity, float iso_padding,
+    float iso_offset_x_adjust, float iso_offset_y_adjust) {
 
   auto start = SDL_GetTicks();
   std::vector<uint32_t> pixels;
@@ -72,9 +73,9 @@ TextureHandle create_texture_from_heightmap(
     params.tile_height = 1.0f;
     params.height_scale = 100.0f;
 
-    IsometricView iso_view =
-        create_isometric_heightmap(heightmap, contour_lines, width, height,
-                                   params, palette, contour_opacity);
+    IsometricView iso_view = create_isometric_heightmap(
+        heightmap, contour_lines, width, height, params, palette,
+        contour_opacity, iso_padding, iso_offset_x_adjust, iso_offset_y_adjust);
     pixels = std::move(iso_view.pixels);
     tex_width = iso_view.width;
     tex_height = iso_view.height;

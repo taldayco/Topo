@@ -26,6 +26,7 @@ add_executable(topogen
     render.cpp
     isometric.cpp
     detail.cpp
+    basalt.cpp
 )
 
 target_link_libraries(topogen PRIVATE SDL3::SDL3 imgui)

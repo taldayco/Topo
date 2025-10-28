@@ -1,10 +1,11 @@
 #include "isometric.h"
+#include "basalt.h"
+#include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>
 
 void world_to_iso(float x, float y, float z, float &out_x, float &out_y,
                   const IsometricParams &params) {
-  // Standard isometric projection
   out_x = (x - y) * params.tile_width;
   out_y = (x + y) * params.tile_height - z * params.height_scale;
 }
@@ -47,71 +48,70 @@ static void draw_line_iso(std::vector<uint32_t> &pixels, int width, int height,
   }
 }
 
-IsometricView create_isometric_heightmap(std::span<const float> heightmap,
-                                         std::span<const Line> contour_lines,
-                                         int map_width, int map_height,
-                                         const IsometricParams &params,
-                                         const Palette &palette,
-                                         float contour_opacity) {
+IsometricView create_isometric_heightmap(
+    std::span<const float> heightmap, std::span<const Line> contour_lines,
+    int map_width, int map_height, const IsometricParams &params,
+    const Palette &palette, float contour_opacity, float padding,
+    float offset_x_adjust, float offset_y_adjust) {
 
-  // Calculate isometric view dimensions
+  const float HEX_SIZE = 8.0f;
+
+  std::vector<HexColumn> columns =
+      generate_basalt_columns(heightmap, map_width, map_height, HEX_SIZE);
+
+  if (columns.empty()) {
+    SDL_Log("Warning: No columns generated, creating fallback view");
+
+    IsometricView view;
+    view.width = map_width * 4;
+    view.height = map_height * 4;
+    view.pixels.resize(view.width * view.height, 0xFF2D2D30);
+    return view;
+  }
+
+  // Calculate bounds
   float min_x = 1e9f, max_x = -1e9f;
   float min_y = 1e9f, max_y = -1e9f;
 
-  for (int y = 0; y <= map_height; ++y) {
-    for (int x = 0; x <= map_width; ++x) {
-      float z = 0;
-      if (x < map_width && y < map_height) {
-        z = heightmap[y * map_width + x];
-      }
+  for (const auto &col : columns) {
+    Vec2 corners[6];
+    get_hex_corners(col.q, col.r, HEX_SIZE, corners);
+
+    // Check all 6 corners at both top and bottom height
+    for (int i = 0; i < 6; ++i) {
+      // Top of column
       float iso_x, iso_y;
-      world_to_iso(x, y, z, iso_x, iso_y, params);
+      world_to_iso(corners[i].x, corners[i].y, col.height, iso_x, iso_y,
+                   params);
       min_x = std::min(min_x, iso_x);
       max_x = std::max(max_x, iso_x);
+      min_y = std::min(min_y, iso_y);
+      max_y = std::max(max_y, iso_y);
+
+      // Bottom of column (for side faces)
+      world_to_iso(corners[i].x, corners[i].y, 0.0f, iso_x, iso_y, params);
       min_y = std::min(min_y, iso_y);
       max_y = std::max(max_y, iso_y);
     }
   }
 
-  int view_width = (int)(max_x - min_x) + 20;
-  int view_height = (int)(max_y - min_y) + 20;
+  int view_width = (int)(max_x - min_x) + (int)(padding * 2);
+  int view_height = (int)(max_y - min_y) + (int)(padding * 2);
 
   IsometricView view;
   view.width = view_width;
   view.height = view_height;
   view.pixels.resize(view_width * view_height, 0xFF2D2D30);
 
-  float offset_x = -min_x + 10;
-  float offset_y = -min_y + 10;
+  // Use the offset adjustments
+  float offset_x = -min_x + padding + offset_x_adjust;
+  float offset_y = -min_y + padding + offset_y_adjust;
 
-  for (int y = map_height - 1; y >= 0; --y) {
-    for (int x = map_width - 1; x >= 0; --x) {
-      float z = heightmap[y * map_width + x];
-      uint32_t color = organic_color(z, x, y, palette);
+  // Render basalt columns
+  render_basalt_columns(view.pixels, view_width, view_height, columns, HEX_SIZE,
+                        offset_x, offset_y, params, palette);
 
-      float corners_x[4], corners_y[4];
-      world_to_iso(x, y, z, corners_x[0], corners_y[0], params);
-      world_to_iso(x + 1, y, z, corners_x[1], corners_y[1], params);
-      world_to_iso(x + 1, y + 1, z, corners_x[2], corners_y[2], params);
-      world_to_iso(x, y + 1, z, corners_x[3], corners_y[3], params);
-
-      float center_x = (corners_x[0] + corners_x[2]) / 2 + offset_x;
-      float center_y = (corners_y[0] + corners_y[2]) / 2 + offset_y;
-
-      for (int dy = -2; dy <= 2; ++dy) {
-        for (int dx = -2; dx <= 2; ++dx) {
-          int px = (int)center_x + dx;
-          int py = (int)center_y + dy;
-          if (px >= 0 && px < view_width && py >= 0 && py < view_height) {
-            view.pixels[py * view_width + px] = color;
-          }
-        }
-      }
-    }
-  }
-
-  // Render contour lines with translucency
-  uint32_t base_line = palette.colors[5];
+  // Render contour lines
   uint32_t line_color = ((uint8_t)(contour_opacity * 255) << 24) | 0x00DDDDDD;
 
   for (const auto &line : contour_lines) {
