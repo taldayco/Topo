@@ -195,11 +195,11 @@ static void compute_visible_edges(std::vector<HexColumn> &columns) {
       auto it = col_map.find(neighbor_hc);
 
       if (it == col_map.end()) {
-        // No neighbor - edge is visible with full height
+        // No neighbor: edge is visible with full height
         col.visible_edges[i] = true;
         col.edge_drops[i] = col.height;
       } else {
-        // Neighbor exists - check height difference
+        // Neighbor exists: check height difference
         float height_diff = col.height - it->second->height;
         if (height_diff > 0.01f) {
           col.visible_edges[i] = true;
@@ -452,7 +452,7 @@ void render_basalt_columns(std::vector<uint32_t> &pixels, int view_width,
               return (a->q + a->r) > (b->q + b->r);
             });
 
-  // PASS 1: Draw ALL side faces (back to front)
+  // Draw side faces back to front
   for (const auto *col : sorted) {
     uint32_t color = organic_color(col->base_height, col->q, col->r, palette);
 
@@ -471,7 +471,7 @@ void render_basalt_columns(std::vector<uint32_t> &pixels, int view_width,
     }
   }
 
-  // PASS 2: Draw ALL top faces (back to front)
+  // Draw top faces back to front
   for (const auto *col : sorted) {
     uint32_t color = organic_color(col->base_height, col->q, col->r, palette);
 

@@ -1,9 +1,7 @@
-// noise.cpp
 #include "noise.h"
 #include "FastNoiseLite.h"
 #include <algorithm>
 #include <cmath>
-#include <cstdint>
 #include <vector>
 
 void generate_heightmap(std::span<float> out, int width, int height,
@@ -61,12 +59,12 @@ void generate_heightmap(std::span<float> out, int width, int height,
     frequency *= params.lacunarity;
   }
   for (int x = 0; x < width; ++x) {
-    out[x] = out[width + x];                                       // Top row
-    out[(height - 1) * width + x] = out[(height - 2) * width + x]; // Bottom row
+    out[x] = out[width + x];
+    out[(height - 1) * width + x] = out[(height - 2) * width + x];
   }
   for (int y = 0; y < height; ++y) {
-    out[y * width] = out[y * width + 1];                         // Left column
-    out[y * width + (width - 1)] = out[y * width + (width - 2)]; // Right column
+    out[y * width] = out[y * width + 1];
+    out[y * width + (width - 1)] = out[y * width + (width - 2)];
   }
   for (int i = 0; i < width * height; ++i) {
     out[i] = (out[i] / max_value + 1.0f) * 0.5f;

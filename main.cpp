@@ -13,10 +13,10 @@ constexpr int MAP_WIDTH = 512;
 constexpr int MAP_HEIGHT = 512;
 constexpr int WINDOW_WIDTH = 1400;
 constexpr int WINDOW_HEIGHT = 1024;
-// Default parameters
 constexpr NoiseParams DEFAULT_NOISE = {0.003f, 6, 2.0f, 0.5f, 1337, 8};
 constexpr float DEFAULT_CONTOUR_INTERVAL = 0.05f;
 constexpr bool DEFAULT_ISOMETRIC = true;
+
 static float iso_padding = 50.0f;
 static float iso_offset_x_adjust = 0.0f;
 static float iso_offset_y_adjust = 0.0f;
@@ -134,7 +134,6 @@ void render_ui() {
                    ImGuiWindowFlags_NoCollapse);
 
   if (map_texture.texture) {
-    // Scale texture to fit window while maintaining aspect ratio
     float tex_w = map_texture.width;
     float tex_h = map_texture.height;
     float window_w = 1024.0f;
@@ -144,7 +143,6 @@ void render_ui() {
     float display_w = tex_w * scale;
     float display_h = tex_h * scale;
 
-    // Center the image
     float offset_x = (window_w - display_w) * 0.5f;
     float offset_y = (window_h - display_h) * 0.5f;
 
@@ -155,8 +153,6 @@ void render_ui() {
   }
 
   ImGui::End();
-
-  // ... rest of function
 
   ImGui::SetNextWindowPos({1024, 0}, ImGuiCond_Always);
   ImGui::SetNextWindowSize({376, 1024}, ImGuiCond_Always);

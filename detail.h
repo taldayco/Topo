@@ -1,4 +1,3 @@
-// detail.h
 #pragma once
 #include "palettes.h"
 #include <cstdint>

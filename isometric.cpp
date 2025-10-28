@@ -79,7 +79,6 @@ IsometricView create_isometric_heightmap(
 
     // Check all 6 corners at both top and bottom height
     for (int i = 0; i < 6; ++i) {
-      // Top of column
       float iso_x, iso_y;
       world_to_iso(corners[i].x, corners[i].y, col.height, iso_x, iso_y,
                    params);
@@ -88,7 +87,6 @@ IsometricView create_isometric_heightmap(
       min_y = std::min(min_y, iso_y);
       max_y = std::max(max_y, iso_y);
 
-      // Bottom of column (for side faces)
       world_to_iso(corners[i].x, corners[i].y, 0.0f, iso_x, iso_y, params);
       min_y = std::min(min_y, iso_y);
       max_y = std::max(max_y, iso_y);
@@ -103,15 +101,12 @@ IsometricView create_isometric_heightmap(
   view.height = view_height;
   view.pixels.resize(view_width * view_height, 0xFF2D2D30);
 
-  // Use the offset adjustments
   float offset_x = -min_x + padding + offset_x_adjust;
   float offset_y = -min_y + padding + offset_y_adjust;
 
-  // Render basalt columns
   render_basalt_columns(view.pixels, view_width, view_height, columns, HEX_SIZE,
                         offset_x, offset_y, params, palette);
 
-  // Render contour lines
   uint32_t line_color = ((uint8_t)(contour_opacity * 255) << 24) | 0x00DDDDDD;
 
   for (const auto &line : contour_lines) {

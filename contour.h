@@ -1,4 +1,3 @@
-// contour.h
 #pragma once
 #include <span>
 #include <vector>

@@ -1,4 +1,3 @@
-// isometric.h
 #pragma once
 #include "contour.h"
 #include "palettes.h"

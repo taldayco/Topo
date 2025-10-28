@@ -86,7 +86,7 @@ TextureHandle create_texture_from_heightmap(
 
     const float HEX_SIZE = 8.0f;
     const float sqrt3 = 1.732f;
-    const uint32_t BACKGROUND = 0xFF2D2D30; // Match isometric.cpp background
+    const uint32_t BACKGROUND = 0xFF2D2D30;
 
     for (int y = 0; y < tex_height; ++y) {
       for (int x = 0; x < tex_width; ++x) {

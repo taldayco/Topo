@@ -1,5 +1,3 @@
-
-// noise.h
 #pragma once
 #include <span>
 

@@ -5,7 +5,7 @@
 
 struct Palette {
   const char *name;
-  uint32_t colors[6]; // base, dark, mid, light, accent, line
+  uint32_t colors[6];
 };
 
 static const Palette PALETTES[] = {
