@@ -80,13 +80,57 @@ TextureHandle create_texture_from_heightmap(
     tex_height = iso_view.height;
 
     SDL_Log("Isometric view: %dx%d", tex_width, tex_height);
+
+    SDL_Log("Isometric view: %dx%d", tex_width, tex_height);
+
+    const float HEX_SIZE = 8.0f;
+    const float sqrt3 = 1.732f;
+    const uint32_t BACKGROUND = 0xFF2D2D30; // Match isometric.cpp background
+
+    for (int y = 0; y < tex_height; ++y) {
+      for (int x = 0; x < tex_width; ++x) {
+        int idx = y * tex_width + x;
+        uint32_t pixel = pixels[idx];
+
+        if (pixel == BACKGROUND)
+          continue;
+
+        float q = x / (HEX_SIZE * sqrt3);
+        float r = y / HEX_SIZE - q * 0.5f;
+
+        int iq = (int)std::round(q);
+        int ir = (int)std::round(r);
+        int is = (int)std::round(-q - r);
+
+        float dq = std::abs(iq - q);
+        float dr = std::abs(ir - r);
+        float ds = std::abs(is - (-q - r));
+
+        if (dq > dr && dq > ds) {
+          iq = -ir - is;
+        } else if (dr > ds) {
+          ir = -iq - is;
+        }
+
+        uint32_t hash = ((uint32_t)iq * 374761393) ^ ((uint32_t)ir * 668265263);
+        float threshold = ((hash & 0xFF) / 255.0f - 0.5f) * 0.25f;
+
+        uint8_t r_out = std::clamp(
+            (int)(((pixel >> 16) & 0xFF) * (1.0f + threshold)), 0, 255);
+        uint8_t g_out = std::clamp(
+            (int)(((pixel >> 8) & 0xFF) * (1.0f + threshold)), 0, 255);
+        uint8_t b_out =
+            std::clamp((int)((pixel & 0xFF) * (1.0f + threshold)), 0, 255);
+
+        pixels[idx] = 0xFF000000 | (r_out << 16) | (g_out << 8) | b_out;
+      }
+    }
+
   } else {
-    // 2D orthographic view
     tex_width = width;
     tex_height = height;
     pixels.resize(tex_width * tex_height);
 
-    // STEP 1: Base color pass
     for (int y = 0; y < height; ++y) {
       for (int x = 0; x < width; ++x) {
         int i = y * width + x;
@@ -94,12 +138,10 @@ TextureHandle create_texture_from_heightmap(
       }
     }
 
-    // STEP 2: Add procedural details (rocks, moss, grass)
     add_procedural_details(pixels, heightmap, width, height, palette,
                            detail_params);
 
-    // STEP 3: Draw contour lines on top
-    uint32_t base_line = palette.colors[5]; // Use palette line color
+    uint32_t base_line = palette.colors[5];
     uint32_t line_color =
         ((uint8_t)(contour_opacity * 255) << 24) | (base_line & 0x00FFFFFF);
     for (const auto &line : contour_lines) {
@@ -112,7 +154,6 @@ TextureHandle create_texture_from_heightmap(
   SDL_Log("Rendering: %llu ms for %zu lines", after_render - start,
           contour_lines.size());
 
-  // Upload to GPU
   SDL_GPUTextureCreateInfo tex_info = {};
   tex_info.type = SDL_GPU_TEXTURETYPE_2D;
   tex_info.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;

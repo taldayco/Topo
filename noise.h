@@ -10,6 +10,7 @@ struct NoiseParams {
   float gain = 0.5f;
   int seed = 1337;
   int terrace_levels = 8;
+  int min_region_size = 153;
 };
 
 void generate_heightmap(std::span<float> out, int width, int height,

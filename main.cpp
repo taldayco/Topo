@@ -154,6 +154,8 @@ void render_ui() {
   need_regenerate |= ImGui::SliderInt("Seed", &noise_params.seed, 0, 10000);
   need_regenerate |=
       ImGui::SliderInt("Terrace Levels", &noise_params.terrace_levels, 3, 20);
+  need_regenerate |= ImGui::SliderInt("Min Region Size",
+                                      &noise_params.min_region_size, 50, 2000);
   ImGui::Separator();
   ImGui::Text("Contour Lines");
   need_regenerate |=

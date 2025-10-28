@@ -6,8 +6,8 @@
 #include <vector>
 
 struct DetailParams {
-  // Reserved for future basalt customization
   float column_size = 8.0f;
+  float dither_strength = 0.15f;
 };
 
 void add_procedural_details(std::vector<uint32_t> &pixels,
