@@ -282,11 +282,15 @@ extract_channel_spaces(const std::vector<HexColumn> &columns, int width,
             continue;
           int nidx = ny * width + nx;
 
-          float elevation_diff = std::abs(heightmap[nidx] - base_elevation);
+          if (!visited[nidx] && !column_mask[nidx]) {
+            float elevation_diff = std::abs(heightmap[nidx] - base_elevation);
 
-          if (!visited[nidx] && !column_mask[nidx] && elevation_diff < 0.02f) {
-            visited[nidx] = 1;
-            q.push(nidx);
+            // Allow crossing small elevation differences to capture noise
+            // artifacts
+            if (elevation_diff < 0.035f || elevation_diff > 0.1f) {
+              visited[nidx] = 1;
+              q.push(nidx);
+            }
           }
         }
       }
@@ -389,6 +393,45 @@ subdivide_large_regions(const std::vector<ChannelRegion> &regions,
 
   return result;
 }
+static void fill_holes_in_region(ChannelRegion &region, int width, int height) {
+  std::unordered_set<int> pixel_set(region.pixels.begin(), region.pixels.end());
+
+  // Find bounding box
+  int min_x = width, max_x = 0, min_y = height, max_y = 0;
+  for (int idx : region.pixels) {
+    int x = idx % width, y = idx / width;
+    min_x = std::min(min_x, x);
+    max_x = std::max(max_x, x);
+    min_y = std::min(min_y, y);
+    max_y = std::max(max_y, y);
+  }
+
+  // Check all pixels in bounding box
+  for (int y = min_y; y <= max_y; ++y) {
+    for (int x = min_x; x <= max_x; ++x) {
+      int idx = y * width + x;
+      if (pixel_set.count(idx))
+        continue;
+
+      // Check if surrounded by region pixels (4-connected)
+      int count = 0;
+      int dirs[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+      for (auto [dx, dy] : dirs) {
+        int nx = x + dx, ny = y + dy;
+        if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+          if (pixel_set.count(ny * width + nx))
+            count++;
+        }
+      }
+
+      // If mostly surrounded, it's a hole - fill it
+      if (count >= 3) {
+        region.pixels.push_back(idx);
+        pixel_set.insert(idx);
+      }
+    }
+  }
+}
 std::vector<ChannelRegion>
 filter_water_channels(const std::vector<ChannelRegion> &regions,
                       std::span<const float> heightmap, int width, int height) {
@@ -397,21 +440,23 @@ filter_water_channels(const std::vector<ChannelRegion> &regions,
 
   for (const auto &region : regions) {
     float sum_h = 0;
-    for (int idx : region.pixels) {
+    for (int idx : region.pixels)
       sum_h += heightmap[idx];
-    }
     float avg_h = sum_h / region.pixels.size();
 
     bool touches_boundary = (region.min_x <= 1 || region.max_x >= width - 2 ||
                              region.min_y <= 1 || region.max_y >= height - 2);
 
-    bool elongated = region.aspect_ratio > 2.2f;
-    bool reasonable_size =
-        region.pixels.size() > 1500 && region.pixels.size() < 25000;
-    bool low_elevation = avg_h < 0.4f;
-    bool interior = !touches_boundary; // Only interior channels
+    // Different water types
+    bool is_river = region.aspect_ratio > 2.0f && region.pixels.size() > 800;
+    bool is_pool = region.pixels.size() > 300 && region.pixels.size() < 5000;
+    bool is_lake = region.pixels.size() > 2000;
 
-    if (elongated && reasonable_size && low_elevation && interior) {
+    bool low_elevation = avg_h < 0.5f;
+    bool interior = !touches_boundary;
+
+    // Accept rivers, pools, or lakes at low elevation
+    if (interior && low_elevation && (is_river || is_pool || is_lake)) {
       candidates.push_back(region);
     }
   }
@@ -432,8 +477,38 @@ filter_water_channels(const std::vector<ChannelRegion> &regions,
               avg_h);
     }
   }
+  for (auto &candidate : candidates) {
+    fill_holes_in_region(candidate, width, height);
+  }
 
+  SDL_Log("Phase 3.1: Filtered %zu water channel candidates from %zu regions",
+          candidates.size(), regions.size());
   return candidates;
+}
+
+static void densify_region(std::vector<int> &pixels, int width, int height) {
+  std::unordered_set<int> pixel_set(pixels.begin(), pixels.end());
+  std::vector<int> to_add;
+
+  for (int idx : pixels) {
+    int x = idx % width;
+    int y = idx / width;
+
+    // Add immediate 4-connected neighbors if they're within the region bounds
+    int neighbors[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+    for (auto [dx, dy] : neighbors) {
+      int nx = x + dx, ny = y + dy;
+      if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+        int nidx = ny * width + nx;
+        if (!pixel_set.count(nidx)) {
+          to_add.push_back(nidx);
+          pixel_set.insert(nidx);
+        }
+      }
+    }
+  }
+
+  pixels.insert(pixels.end(), to_add.begin(), to_add.end());
 }
 static WaterBody channel_to_water_body(const ChannelRegion &channel,
                                        std::span<const float> heightmap,
@@ -468,6 +543,7 @@ static WaterBody channel_to_water_body(const ChannelRegion &channel,
   water.max_y = channel.max_y;
   water.aspect_ratio = channel.aspect_ratio;
   water.pixels = channel.pixels;
+  densify_region(water.pixels, width, height);
   water.time_offset = (hash_plateau(channel_idx) % 1000) / 1000.0f * 6.283185f;
 
   build_triangle_mesh_from_polygon(poly, water.height, water.mesh);
@@ -477,6 +553,7 @@ static WaterBody channel_to_water_body(const ChannelRegion &channel,
 
   return water;
 }
+
 std::vector<WaterBody>
 channels_to_water_bodies(const std::vector<ChannelRegion> &channels,
                          std::span<const float> heightmap, int width,
@@ -625,7 +702,7 @@ void render_water(std::vector<uint32_t> &pixels, int view_w, int view_h,
 
   for (const auto &water : water_bodies) {
     for (int idx : water.pixels) {
-      int px = idx % 512; // MAP_WIDTH
+      int px = idx % 512;
       int py = idx / 512;
 
       float z = get_water_height(px, py, water.height, time, water.time_offset);
@@ -635,28 +712,23 @@ void render_water(std::vector<uint32_t> &pixels, int view_w, int view_h,
       iso_x += off_x;
       iso_y += off_y;
 
-      // Draw small quad/circle at this pixel
-      for (int dy = -1; dy <= 1; ++dy) {
-        for (int dx = -1; dx <= 1; ++dx) {
+      // Calculate color once
+      float depth_factor =
+          std::clamp(0.9f + (z - water.height) * 2.0f, 0.8f, 1.1f);
+      uint8_t r =
+          (uint8_t)(((Config::WATER_COLOR >> 16) & 0xFF) * depth_factor);
+      uint8_t g = (uint8_t)(((Config::WATER_COLOR >> 8) & 0xFF) * depth_factor);
+      uint8_t b = (uint8_t)((Config::WATER_COLOR & 0xFF) * depth_factor);
+      uint32_t color = 0xFF000000 | (r << 16) | (g << 8) | b;
+
+      // Draw with larger kernel for coverage
+      for (int dy = -5; dy <= 5; ++dy) {
+        for (int dx = -5; dx <= 5; ++dx) {
           int x = (int)iso_x + dx;
           int y = (int)iso_y + dy;
           if (x >= 0 && x < view_w && y >= 0 && y < view_h) {
-            // Don't draw over columns (non-background pixels)
             uint32_t existing = pixels[y * view_w + x];
             if (existing == Config::BACKGROUND_COLOR) {
-              float z = get_water_height(px, py, water.height, time,
-                                         water.time_offset);
-
-              float depth_factor =
-                  std::clamp(0.9f + (z - water.height) * 2.0f, 0.8f, 1.1f);
-              uint8_t r = (uint8_t)(((Config::WATER_COLOR >> 16) & 0xFF) *
-                                    depth_factor);
-              uint8_t g =
-                  (uint8_t)(((Config::WATER_COLOR >> 8) & 0xFF) * depth_factor);
-              uint8_t b =
-                  (uint8_t)((Config::WATER_COLOR & 0xFF) * depth_factor);
-              uint32_t color = 0xFF000000 | (r << 16) | (g << 8) | b;
-
               pixels[y * view_w + x] = color;
             }
           }
@@ -664,4 +736,6 @@ void render_water(std::vector<uint32_t> &pixels, int view_w, int view_h,
       }
     }
   }
+
+  SDL_Log("Rendered %zu water bodies", water_bodies.size());
 }
