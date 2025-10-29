@@ -65,22 +65,16 @@ IsometricView create_isometric_heightmap(
   float min_x = 1e9f, max_x = -1e9f;
   float min_y = 1e9f, max_y = -1e9f;
 
-  // FIX: Use terrain.columns instead of columns
-  for (const auto &col : terrain.columns) {
-    Vec2 corners[6];
-    // FIX: Use Config::HEX_SIZE instead of HEX_SIZE
-    get_hex_corners(col.q, col.r, Config::HEX_SIZE, corners);
+  float test_heights[] = {0.0f, 0.5f, 1.0f};
+  int test_coords[][2] = {
+      {0, 0}, {map_width, 0}, {map_width, map_height}, {0, map_height}};
 
-    for (int i = 0; i < 6; ++i) {
+  for (auto h : test_heights) {
+    for (auto [x, y] : test_coords) {
       float iso_x, iso_y;
-      world_to_iso(corners[i].x, corners[i].y, col.height, iso_x, iso_y,
-                   params);
+      world_to_iso(x, y, h, iso_x, iso_y, params);
       min_x = std::min(min_x, iso_x);
       max_x = std::max(max_x, iso_x);
-      min_y = std::min(min_y, iso_y);
-      max_y = std::max(max_y, iso_y);
-
-      world_to_iso(corners[i].x, corners[i].y, 0.0f, iso_x, iso_y, params);
       min_y = std::min(min_y, iso_y);
       max_y = std::max(max_y, iso_y);
     }
@@ -97,12 +91,10 @@ IsometricView create_isometric_heightmap(
   float offset_x = -min_x + padding + offset_x_adjust;
   float offset_y = -min_y + padding + offset_y_adjust;
 
-  // FIX: Use terrain.columns and Config::HEX_SIZE
   render_basalt_columns(view.pixels, view_width, view_height, terrain.columns,
                         Config::HEX_SIZE, offset_x, offset_y, params, palette);
 
   float time = SDL_GetTicks() / 1000.0f;
-  // FIX: Use terrain.water_bodies
   render_water(view.pixels, view_width, view_height, terrain.water_bodies,
                offset_x, offset_y, params, time);
 
