@@ -199,7 +199,7 @@ static void build_triangle_mesh_from_polygon(const std::vector<P2> &poly,
 
 std::vector<ChannelRegion>
 extract_channel_spaces(const std::vector<HexColumn> &columns, int width,
-                       int height) {
+                       int height, std::span<const float> heightmap) {
 
   SDL_Log("Phase 1.1: Extracting channel spaces from %zu columns",
           columns.size());
@@ -256,6 +256,8 @@ extract_channel_spaces(const std::vector<HexColumn> &columns, int width,
       if (column_mask[start] || visited[start])
         continue;
 
+      float base_elevation = heightmap[start];
+
       ChannelRegion region;
       std::queue<int> q;
       q.push(start);
@@ -279,7 +281,10 @@ extract_channel_spaces(const std::vector<HexColumn> &columns, int width,
           if (nx < 0 || ny < 0 || nx >= width || ny >= height)
             continue;
           int nidx = ny * width + nx;
-          if (!visited[nidx] && !column_mask[nidx]) {
+
+          float elevation_diff = std::abs(heightmap[nidx] - base_elevation);
+
+          if (!visited[nidx] && !column_mask[nidx] && elevation_diff < 0.02f) {
             visited[nidx] = 1;
             q.push(nidx);
           }
@@ -289,7 +294,7 @@ extract_channel_spaces(const std::vector<HexColumn> &columns, int width,
       region.min_x = min_x;
       region.max_x = max_x;
       region.min_y = min_y;
-      region.max_y = max_y;
+      region.avg_elevation = base_elevation;
 
       float w = max_x - min_x + 1;
       float h = max_y - min_y + 1;
@@ -320,6 +325,69 @@ extract_channel_spaces(const std::vector<HexColumn> &columns, int width,
   }
 
   return regions;
+}
+std::vector<ChannelRegion>
+subdivide_large_regions(const std::vector<ChannelRegion> &regions,
+                        const std::vector<HexColumn> &columns, int width,
+                        int height) {
+
+  std::vector<ChannelRegion> result;
+
+  for (const auto &region : regions) {
+    // Small regions pass through unchanged
+    if (region.pixels.size() < 50000) {
+      result.push_back(region);
+      continue;
+    }
+
+    // For giant regions, use skeleton tracing to find channel paths
+    // Build mask for this region
+    std::vector<uint8_t> mask(width * height, 0);
+    for (int idx : region.pixels) {
+      mask[idx] = 1;
+    }
+
+    // Find medial axis (pixels equidistant from columns)
+    // Simple version: keep pixels with small "distance to nearest column"
+    std::vector<int> channel_pixels;
+
+    for (int idx : region.pixels) {
+      int x = idx % width;
+      int y = idx / width;
+
+      // Find distance to nearest column
+      float min_dist = 1e9f;
+      for (const auto &col : columns) {
+        Vec2 corners[6];
+        get_hex_corners(col.q, col.r, Config::HEX_SIZE, corners);
+
+        float cx = 0, cy = 0;
+        for (int i = 0; i < 6; ++i) {
+          cx += corners[i].x;
+          cy += corners[i].y;
+        }
+        cx /= 6.0f;
+        cy /= 6.0f;
+
+        float dist = std::hypot(x - cx, y - cy);
+        min_dist = std::min(min_dist, dist);
+      }
+
+      // Keep pixels that are reasonably close to columns (= narrow channels)
+      if (min_dist < Config::HEX_SIZE * 3.0f) {
+        channel_pixels.push_back(idx);
+      }
+    }
+
+    if (channel_pixels.size() > 1000) {
+      ChannelRegion sub;
+      sub.pixels = channel_pixels;
+      // Recompute bounds, aspect ratio...
+      result.push_back(sub);
+    }
+  }
+
+  return result;
 }
 std::vector<ChannelRegion>
 filter_water_channels(const std::vector<ChannelRegion> &regions,
@@ -554,49 +622,46 @@ static void draw_water_triangle(std::vector<uint32_t> &pixels, int width,
 void render_water(std::vector<uint32_t> &pixels, int view_w, int view_h,
                   const std::vector<WaterBody> &water_bodies, float off_x,
                   float off_y, const IsometricParams &params, float time) {
-  uint32_t water_base = Config::WATER_COLOR;
 
   for (const auto &water : water_bodies) {
-    const auto &verts = water.mesh.vertices;
-    if (verts.size() < 3)
-      continue;
+    for (int idx : water.pixels) {
+      int px = idx % 512; // MAP_WIDTH
+      int py = idx / 512;
 
-    for (size_t i = 0; i + 2 < verts.size(); i += 3) {
-      const auto &v0 = verts[i + 0];
-      const auto &v1 = verts[i + 1];
-      const auto &v2 = verts[i + 2];
+      float z = get_water_height(px, py, water.height, time, water.time_offset);
 
-      float z0 =
-          get_water_height(v0.x, v0.y, v0.base_z, time, water.time_offset);
-      float z1 =
-          get_water_height(v1.x, v1.y, v1.base_z, time, water.time_offset);
-      float z2 =
-          get_water_height(v2.x, v2.y, v2.base_z, time, water.time_offset);
+      float iso_x, iso_y;
+      world_to_iso(px, py, z, iso_x, iso_y, params);
+      iso_x += off_x;
+      iso_y += off_y;
 
-      float x0, y0, x1, y1, x2, y2;
-      world_to_iso(v0.x, v0.y, z0, x0, y0, params);
-      world_to_iso(v1.x, v1.y, z1, x1, y1, params);
-      world_to_iso(v2.x, v2.y, z2, x2, y2, params);
+      // Draw small quad/circle at this pixel
+      for (int dy = -1; dy <= 1; ++dy) {
+        for (int dx = -1; dx <= 1; ++dx) {
+          int x = (int)iso_x + dx;
+          int y = (int)iso_y + dy;
+          if (x >= 0 && x < view_w && y >= 0 && y < view_h) {
+            // Don't draw over columns (non-background pixels)
+            uint32_t existing = pixels[y * view_w + x];
+            if (existing == Config::BACKGROUND_COLOR) {
+              float z = get_water_height(px, py, water.height, time,
+                                         water.time_offset);
 
-      x0 += off_x;
-      y0 += off_y;
-      x1 += off_x;
-      y1 += off_y;
-      x2 += off_x;
-      y2 += off_y;
+              float depth_factor =
+                  std::clamp(0.9f + (z - water.height) * 2.0f, 0.8f, 1.1f);
+              uint8_t r = (uint8_t)(((Config::WATER_COLOR >> 16) & 0xFF) *
+                                    depth_factor);
+              uint8_t g =
+                  (uint8_t)(((Config::WATER_COLOR >> 8) & 0xFF) * depth_factor);
+              uint8_t b =
+                  (uint8_t)((Config::WATER_COLOR & 0xFF) * depth_factor);
+              uint32_t color = 0xFF000000 | (r << 16) | (g << 8) | b;
 
-      float avg_z = (z0 + z1 + z2) / 3.0f;
-      float depth_factor =
-          std::clamp(0.9f + (avg_z - v0.base_z) * 2.0f, 0.8f, 1.1f);
-      uint8_t r = (uint8_t)(((water_base >> 16) & 0xFF) * depth_factor);
-      uint8_t g = (uint8_t)(((water_base >> 8) & 0xFF) * depth_factor);
-      uint8_t b = (uint8_t)((water_base & 0xFF) * depth_factor);
-      uint32_t color = 0xFF000000 | (r << 16) | (g << 8) | b;
-
-      draw_water_triangle(pixels, view_w, view_h, x0, y0, x1, y1, x2, y2,
-                          color);
+              pixels[y * view_w + x] = color;
+            }
+          }
+        }
+      }
     }
   }
-
-  SDL_Log("Rendered %zu water bodies", water_bodies.size());
 }

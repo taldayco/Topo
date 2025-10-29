@@ -5,12 +5,14 @@
 #include "types.h"
 #include <cstdint>
 #include <span>
+#include <unordered_set>
 #include <vector>
 
 struct ChannelRegion {
   std::vector<int> pixels;
   float min_x, max_x, min_y, max_y;
   float aspect_ratio;
+  float avg_elevation;
 };
 struct WaterVertex {
   float x, y;
@@ -33,6 +35,7 @@ struct WaterBody {
   std::vector<int> pixels;
   float time_offset = 0.f;
   WaterMesh mesh;
+  std::unordered_set<int> pixel_set;
 };
 
 struct WaveParams {
@@ -43,7 +46,8 @@ struct WaveParams {
 
 std::vector<ChannelRegion>
 extract_channel_spaces(const std::vector<HexColumn> &columns, int width,
-                       int height);
+                       int height, std::span<const float> heightmap);
+
 std::vector<ChannelRegion>
 filter_water_channels(const std::vector<ChannelRegion> &regions,
                       std::span<const float> heightmap, int width, int height);

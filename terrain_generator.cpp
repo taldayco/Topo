@@ -18,9 +18,11 @@ TerrainGenerator::generate(std::span<const float> heightmap, int width,
   SDL_Log("TerrainGenerator: Generated %zu columns on %zu plateaus",
           data.columns.size(), data.plateaus_with_columns.size());
 
-  auto channel_regions = extract_channel_spaces(data.columns, width, height);
+  auto channel_regions =
+      extract_channel_spaces(data.columns, width, height, heightmap);
   SDL_Log("TerrainGenerator: Found %zu channel regions",
           channel_regions.size());
+
   auto water_channels =
       filter_water_channels(channel_regions, heightmap, width, height);
   SDL_Log("TerrainGenerator: Selected %zu water channels",
