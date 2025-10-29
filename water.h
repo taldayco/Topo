@@ -7,6 +7,11 @@
 #include <span>
 #include <vector>
 
+struct ChannelRegion {
+  std::vector<int> pixels;
+  float min_x, max_x, min_y, max_y;
+  float aspect_ratio;
+};
 struct WaterVertex {
   float x, y;
   float base_z;
@@ -16,7 +21,7 @@ struct WaterMesh {
   std::vector<WaterVertex> vertices;
   int grid_width = 0;
   int grid_height = 0;
-  std::vector<uint8_t> active; // size: (grid_width - 1) * (grid_height - 1)
+  std::vector<uint8_t> active;
 };
 
 struct WaterBody {
@@ -36,13 +41,21 @@ struct WaveParams {
   float speed = 1.0f;
 };
 
-// Keep the same signature TerrainGenerator already calls:
+std::vector<ChannelRegion>
+extract_channel_spaces(const std::vector<HexColumn> &columns, int width,
+                       int height);
+std::vector<ChannelRegion>
+filter_water_channels(const std::vector<ChannelRegion> &regions,
+                      std::span<const float> heightmap, int width, int height);
+std::vector<WaterBody>
+channels_to_water_bodies(const std::vector<ChannelRegion> &channels,
+                         std::span<const float> heightmap, int width,
+                         int height);
 std::vector<WaterBody>
 identify_water_bodies(std::span<const float> heightmap, int width, int height,
                       const std::vector<Plateau> &plateaus,
                       const std::vector<int> &plateaus_with_columns);
 
-// NEW: masked water grid built from a region mask (per-plateau)
 void generate_water_mesh_masked(WaterBody &water,
                                 const std::vector<uint8_t> &mask, int mask_w,
                                 int mask_h, float grid_spacing);

@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <queue>
 #include <random>
 #include <unordered_set>
 #include <vector>
@@ -14,7 +15,25 @@
 static uint32_t hash_plateau(int idx) {
   return (idx * 374761393u) ^ 668265263u;
 }
+static bool pixel_in_hex(float px, float py, int q, int r, float hex_size) {
+  Vec2 corners[6];
+  get_hex_corners(q, r, hex_size, corners);
 
+  bool inside = true;
+  for (int i = 0; i < 6; ++i) {
+    int next = (i + 1) % 6;
+    float edge_x = corners[next].x - corners[i].x;
+    float edge_y = corners[next].y - corners[i].y;
+    float to_point_x = px - corners[i].x;
+    float to_point_y = py - corners[i].y;
+    float cross = edge_x * to_point_y - edge_y * to_point_x;
+    if (cross < 0) {
+      inside = false;
+      break;
+    }
+  }
+  return inside;
+}
 struct P2 {
   float x, y;
 };
@@ -178,6 +197,237 @@ static void build_triangle_mesh_from_polygon(const std::vector<P2> &poly,
   }
 }
 
+std::vector<ChannelRegion>
+extract_channel_spaces(const std::vector<HexColumn> &columns, int width,
+                       int height) {
+
+  SDL_Log("Phase 1.1: Extracting channel spaces from %zu columns",
+          columns.size());
+
+  std::vector<uint8_t> column_mask(width * height, 0);
+  int column_pixels = 0;
+
+  for (const auto &col : columns) {
+    Vec2 corners[6];
+    get_hex_corners(col.q, col.r, Config::HEX_SIZE, corners);
+
+    float min_x = 1e9f, max_x = -1e9f;
+    float min_y = 1e9f, max_y = -1e9f;
+    for (int i = 0; i < 6; ++i) {
+      min_x = std::min(min_x, corners[i].x);
+      max_x = std::max(max_x, corners[i].x);
+      min_y = std::min(min_y, corners[i].y);
+      max_y = std::max(max_y, corners[i].y);
+    }
+
+    int x0 = std::max(0, (int)min_x - 1);
+    int x1 = std::min(width - 1, (int)max_x + 1);
+    int y0 = std::max(0, (int)min_y - 1);
+    int y1 = std::min(height - 1, (int)max_y + 1);
+
+    for (int y = y0; y <= y1; ++y) {
+      for (int x = x0; x <= x1; ++x) {
+        if (pixel_in_hex(x, y, col.q, col.r, Config::HEX_SIZE)) {
+          int idx = y * width + x;
+          if (!column_mask[idx]) {
+            column_mask[idx] = 1;
+            column_pixels++;
+          }
+        }
+      }
+    }
+  }
+
+  int total_pixels = width * height;
+  int channel_pixels = total_pixels - column_pixels;
+  SDL_Log("  Column pixels: %d / %d (%.1f%%)", column_pixels, total_pixels,
+          100.0f * column_pixels / total_pixels);
+  SDL_Log("  Channel pixels: %d / %d (%.1f%%)", channel_pixels, total_pixels,
+          100.0f * channel_pixels / total_pixels);
+
+  // Phase 1.3: Flood fill on channel spaces
+  std::vector<uint8_t> visited(width * height, 0);
+  std::vector<ChannelRegion> regions;
+  const int dirs[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+
+  for (int sy = 0; sy < height; ++sy) {
+    for (int sx = 0; sx < width; ++sx) {
+      int start = sy * width + sx;
+      if (column_mask[start] || visited[start])
+        continue;
+
+      ChannelRegion region;
+      std::queue<int> q;
+      q.push(start);
+      visited[start] = 1;
+
+      float min_x = sx, max_x = sx, min_y = sy, max_y = sy;
+
+      while (!q.empty()) {
+        int idx = q.front();
+        q.pop();
+        int cx = idx % width, cy = idx / width;
+        region.pixels.push_back(idx);
+
+        min_x = std::min(min_x, (float)cx);
+        max_x = std::max(max_x, (float)cx);
+        min_y = std::min(min_y, (float)cy);
+        max_y = std::max(max_y, (float)cy);
+
+        for (auto [dx, dy] : dirs) {
+          int nx = cx + dx, ny = cy + dy;
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height)
+            continue;
+          int nidx = ny * width + nx;
+          if (!visited[nidx] && !column_mask[nidx]) {
+            visited[nidx] = 1;
+            q.push(nidx);
+          }
+        }
+      }
+
+      region.min_x = min_x;
+      region.max_x = max_x;
+      region.min_y = min_y;
+      region.max_y = max_y;
+
+      float w = max_x - min_x + 1;
+      float h = max_y - min_y + 1;
+      region.aspect_ratio = std::max(w, h) / std::max(1.0f, std::min(w, h));
+
+      regions.push_back(std::move(region));
+    }
+  }
+
+  SDL_Log("  Found %zu connected channel regions", regions.size());
+
+  if (!regions.empty()) {
+    std::vector<int> sizes;
+    for (const auto &r : regions)
+      sizes.push_back(r.pixels.size());
+    std::sort(sizes.rbegin(), sizes.rend());
+
+    SDL_Log("  Top 10 region sizes:");
+    for (int i = 0; i < std::min(10, (int)sizes.size()); ++i) {
+      SDL_Log("    #%d: %d pixels", i + 1, sizes[i]);
+    }
+
+    SDL_Log("  Aspect ratios:");
+    for (int i = 0; i < std::min(10, (int)regions.size()); ++i) {
+      SDL_Log("    Region #%d: aspect=%.2f, size=%d", i + 1,
+              regions[i].aspect_ratio, (int)regions[i].pixels.size());
+    }
+  }
+
+  return regions;
+}
+std::vector<ChannelRegion>
+filter_water_channels(const std::vector<ChannelRegion> &regions,
+                      std::span<const float> heightmap, int width, int height) {
+
+  std::vector<ChannelRegion> candidates;
+
+  for (const auto &region : regions) {
+    float sum_h = 0;
+    for (int idx : region.pixels) {
+      sum_h += heightmap[idx];
+    }
+    float avg_h = sum_h / region.pixels.size();
+
+    bool touches_boundary = (region.min_x <= 1 || region.max_x >= width - 2 ||
+                             region.min_y <= 1 || region.max_y >= height - 2);
+
+    bool elongated = region.aspect_ratio > 2.2f;
+    bool reasonable_size =
+        region.pixels.size() > 1500 && region.pixels.size() < 25000;
+    bool low_elevation = avg_h < 0.4f;
+    bool interior = !touches_boundary; // Only interior channels
+
+    if (elongated && reasonable_size && low_elevation && interior) {
+      candidates.push_back(region);
+    }
+  }
+
+  SDL_Log("Phase 3.1: Filtered %zu water channel candidates from %zu regions",
+          candidates.size(), regions.size());
+
+  if (!candidates.empty()) {
+    SDL_Log("  Selected channels:");
+    for (size_t i = 0; i < std::min((size_t)5, candidates.size()); ++i) {
+      float sum_h = 0;
+      for (int idx : candidates[i].pixels)
+        sum_h += heightmap[idx];
+      float avg_h = sum_h / candidates[i].pixels.size();
+
+      SDL_Log("    #%zu: aspect=%.2f, size=%d, elev=%.3f", i + 1,
+              candidates[i].aspect_ratio, (int)candidates[i].pixels.size(),
+              avg_h);
+    }
+  }
+
+  return candidates;
+}
+static WaterBody channel_to_water_body(const ChannelRegion &channel,
+                                       std::span<const float> heightmap,
+                                       int width, int height, int channel_idx) {
+  std::vector<uint8_t> mask(width * height, 0);
+  for (int idx : channel.pixels) {
+    if (idx >= 0 && idx < width * height) {
+      mask[idx] = 1;
+    }
+  }
+
+  float sum_h = 0;
+  for (int idx : channel.pixels) {
+    sum_h += heightmap[idx];
+  }
+  float avg_h = sum_h / channel.pixels.size();
+
+  std::vector<P2> poly;
+  trace_outline_4connected(mask, width, height, poly);
+
+  if (poly.size() < 3) {
+    SDL_Log("Channel %d: Failed to trace outline", channel_idx);
+    return {};
+  }
+
+  WaterBody water;
+  water.plateau_index = -1;
+  water.height = avg_h - 0.15f;
+  water.min_x = channel.min_x;
+  water.max_x = channel.max_x;
+  water.min_y = channel.min_y;
+  water.max_y = channel.max_y;
+  water.aspect_ratio = channel.aspect_ratio;
+  water.pixels = channel.pixels;
+  water.time_offset = (hash_plateau(channel_idx) % 1000) / 1000.0f * 6.283185f;
+
+  build_triangle_mesh_from_polygon(poly, water.height, water.mesh);
+
+  SDL_Log("Channel %d: Created water body with %zu vertices", channel_idx,
+          water.mesh.vertices.size());
+
+  return water;
+}
+std::vector<WaterBody>
+channels_to_water_bodies(const std::vector<ChannelRegion> &channels,
+                         std::span<const float> heightmap, int width,
+                         int height) {
+
+  std::vector<WaterBody> water_bodies;
+
+  for (size_t i = 0; i < channels.size(); ++i) {
+    WaterBody water =
+        channel_to_water_body(channels[i], heightmap, width, height, (int)i);
+    if (!water.mesh.vertices.empty()) {
+      water_bodies.push_back(std::move(water));
+    }
+  }
+
+  SDL_Log("Created %zu water bodies from %zu channels", water_bodies.size(),
+          channels.size());
+  return water_bodies;
+}
 std::vector<WaterBody>
 identify_water_bodies(std::span<const float> heightmap, int width, int height,
                       const std::vector<Plateau> &plateaus,
