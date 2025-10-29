@@ -1,13 +1,12 @@
 #pragma once
 #include "contour.h"
 #include "palettes.h"
+#include "types.h"
 #include <cstdint>
 #include <span>
 #include <vector>
 
-struct Vec2 {
-  float x, y;
-};
+struct WaterBody;
 
 struct IsometricParams {
   float tile_width = 2.0f;

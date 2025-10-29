@@ -142,6 +142,30 @@ topogen/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/build
 .PHONY : topogen/fast
 
+basalt.o: basalt.cpp.o
+.PHONY : basalt.o
+
+# target to build an object file
+basalt.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/basalt.cpp.o
+.PHONY : basalt.cpp.o
+
+basalt.i: basalt.cpp.i
+.PHONY : basalt.i
+
+# target to preprocess a source file
+basalt.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/basalt.cpp.i
+.PHONY : basalt.cpp.i
+
+basalt.s: basalt.cpp.s
+.PHONY : basalt.s
+
+# target to generate assembly for a file
+basalt.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/basalt.cpp.s
+.PHONY : basalt.cpp.s
+
 contour.o: contour.cpp.o
 .PHONY : contour.o
 
@@ -165,6 +189,30 @@ contour.s: contour.cpp.s
 contour.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/contour.cpp.s
 .PHONY : contour.cpp.s
+
+detail.o: detail.cpp.o
+.PHONY : detail.o
+
+# target to build an object file
+detail.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/detail.cpp.o
+.PHONY : detail.cpp.o
+
+detail.i: detail.cpp.i
+.PHONY : detail.i
+
+# target to preprocess a source file
+detail.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/detail.cpp.i
+.PHONY : detail.cpp.i
+
+detail.s: detail.cpp.s
+.PHONY : detail.s
+
+# target to generate assembly for a file
+detail.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/detail.cpp.s
+.PHONY : detail.cpp.s
 
 imgui/backends/imgui_impl_sdl3.o: imgui/backends/imgui_impl_sdl3.cpp.o
 .PHONY : imgui/backends/imgui_impl_sdl3.o
@@ -310,6 +358,30 @@ imgui/imgui_widgets.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/imgui.dir/build.make CMakeFiles/imgui.dir/imgui/imgui_widgets.cpp.s
 .PHONY : imgui/imgui_widgets.cpp.s
 
+isometric.o: isometric.cpp.o
+.PHONY : isometric.o
+
+# target to build an object file
+isometric.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/isometric.cpp.o
+.PHONY : isometric.cpp.o
+
+isometric.i: isometric.cpp.i
+.PHONY : isometric.i
+
+# target to preprocess a source file
+isometric.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/isometric.cpp.i
+.PHONY : isometric.cpp.i
+
+isometric.s: isometric.cpp.s
+.PHONY : isometric.s
+
+# target to generate assembly for a file
+isometric.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/isometric.cpp.s
+.PHONY : isometric.cpp.s
+
 main.o: main.cpp.o
 .PHONY : main.o
 
@@ -392,9 +464,15 @@ help:
 	@echo "... rebuild_cache"
 	@echo "... imgui"
 	@echo "... topogen"
+	@echo "... basalt.o"
+	@echo "... basalt.i"
+	@echo "... basalt.s"
 	@echo "... contour.o"
 	@echo "... contour.i"
 	@echo "... contour.s"
+	@echo "... detail.o"
+	@echo "... detail.i"
+	@echo "... detail.s"
 	@echo "... imgui/backends/imgui_impl_sdl3.o"
 	@echo "... imgui/backends/imgui_impl_sdl3.i"
 	@echo "... imgui/backends/imgui_impl_sdl3.s"
@@ -413,6 +491,9 @@ help:
 	@echo "... imgui/imgui_widgets.o"
 	@echo "... imgui/imgui_widgets.i"
 	@echo "... imgui/imgui_widgets.s"
+	@echo "... isometric.o"
+	@echo "... isometric.i"
+	@echo "... isometric.s"
 	@echo "... main.o"
 	@echo "... main.i"
 	@echo "... main.s"

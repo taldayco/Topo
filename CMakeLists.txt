@@ -27,6 +27,8 @@ add_executable(topogen
     isometric.cpp
     detail.cpp
     basalt.cpp
+    plateau.cpp
+    water.cpp
 )
 
 target_link_libraries(topogen PRIVATE SDL3::SDL3 imgui)

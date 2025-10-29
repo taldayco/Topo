@@ -1,6 +1,8 @@
 #include "basalt.h"
 #include "isometric.h"
 #include "palettes.h"
+#include "plateau.h"
+#include "types.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>
@@ -67,10 +69,6 @@ void get_hex_corners(int q, int r, float hex_size, Vec2 corners[6]) {
   }
 }
 
-struct IsoVec2 {
-  float x, y;
-};
-
 static void project_hex_to_iso(const Vec2 corners[6], float z,
                                const IsometricParams &params,
                                IsoVec2 iso_corners[6]) {
@@ -80,126 +78,47 @@ static void project_hex_to_iso(const Vec2 corners[6], float z,
   }
 }
 
-// Detect plateau regions using flood fill
-struct Plateau {
-  float height;
-  std::vector<int> pixels; // Indices into heightmap
-  float center_x, center_y;
-};
-
-static std::vector<Plateau> detect_plateaus(std::span<const float> heightmap,
-                                            int width, int height) {
-
-  std::vector<bool> visited(width * height, false);
-  std::vector<Plateau> plateaus;
-
-  const float HEIGHT_THRESHOLD = 0.02f; // Same height within ±2%
-
-  for (int y = 0; y < height; ++y) {
-    for (int x = 0; x < width; ++x) {
-      int idx = y * width + x;
-      if (visited[idx])
-        continue;
-
-      float plateau_height = heightmap[idx];
-      Plateau plateau;
-      plateau.height = plateau_height;
-
-      // Flood fill
-      std::queue<int> queue;
-      queue.push(idx);
-      visited[idx] = true;
-
-      float sum_x = 0, sum_y = 0;
-      int count = 0;
-
-      while (!queue.empty()) {
-        int current = queue.front();
-        queue.pop();
-
-        plateau.pixels.push_back(current);
-
-        int cx = current % width;
-        int cy = current / width;
-        sum_x += cx;
-        sum_y += cy;
-        count++;
-
-        // Check 4 neighbors
-        int neighbors[4][2] = {{0, -1}, {-1, 0}, {1, 0}, {0, 1}};
-        for (auto [dx, dy] : neighbors) {
-          int nx = cx + dx;
-          int ny = cy + dy;
-
-          if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-            int nidx = ny * width + nx;
-            if (!visited[nidx] &&
-                std::abs(heightmap[nidx] - plateau_height) < HEIGHT_THRESHOLD) {
-              visited[nidx] = true;
-              queue.push(nidx);
-            }
-          }
-        }
-      }
-
-      plateau.center_x = sum_x / count;
-      plateau.center_y = sum_y / count;
-
-      // Only keep plateaus with reasonable size
-      if (count > 50) {
-        plateaus.push_back(plateau);
-      }
-    }
-  }
-
-  SDL_Log("Detected %zu plateaus", plateaus.size());
-  return plateaus;
-}
-
-// Check if hex center is within plateau
 static bool hex_fits_in_plateau(int q, int r, float hex_size,
                                 const std::unordered_set<int> &plateau_set,
                                 int width, int height) {
   float cx, cy;
   hex_to_pixel(q, r, hex_size, cx, cy);
 
-  int px = (int)cx;
-  int py = (int)cy;
+  for (int dy = -1; dy <= 1; ++dy) {
+    for (int dx = -1; dx <= 1; ++dx) {
+      int px = (int)cx + dx;
+      int py = (int)cy + dy;
 
-  if (px < 0 || px >= width || py < 0 || py >= height) {
-    return false;
+      if (px >= 0 && px < width && py >= 0 && py < height) {
+        int idx = py * width + px;
+        if (plateau_set.find(idx) != plateau_set.end()) {
+          return true; // Found at least one pixel in the plateau
+        }
+      }
+    }
   }
 
-  int idx = py * width + px;
-  return plateau_set.find(idx) != plateau_set.end();
+  return false;
 }
 
 static void compute_visible_edges(std::vector<HexColumn> &columns) {
-  // Build spatial lookup
   std::unordered_map<HexCoord, HexColumn *, HexHash> col_map;
   for (auto &col : columns) {
     HexCoord key = {col.q, col.r};
     col_map[key] = &col;
   }
-
   const int neighbors[6][2] = {{1, 0},  {0, 1},  {-1, 1},
                                {-1, 0}, {0, -1}, {1, -1}};
-
-  // For each column, check 6 neighbors
   for (auto &col : columns) {
     for (int i = 0; i < 6; ++i) {
       col.visible_edges[i] = false;
       col.edge_drops[i] = 0.0f;
-
       HexCoord neighbor_hc = {col.q + neighbors[i][0], col.r + neighbors[i][1]};
       auto it = col_map.find(neighbor_hc);
-
       if (it == col_map.end()) {
-        // No neighbor: edge is visible with full height
         col.visible_edges[i] = true;
         col.edge_drops[i] = col.height;
       } else {
-        // Neighbor exists: check height difference
         float height_diff = col.height - it->second->height;
         if (height_diff > 0.01f) {
           col.visible_edges[i] = true;
@@ -208,52 +127,48 @@ static void compute_visible_edges(std::vector<HexColumn> &columns) {
       }
     }
   }
-
-  SDL_Log("Computed edge visibility for %zu columns", columns.size());
 }
-std::vector<HexColumn> generate_basalt_columns(std::span<const float> heightmap,
-                                               int width, int height,
-                                               float hex_size) {
+std::vector<HexColumn>
+generate_basalt_columns(std::span<const float> heightmap, int width, int height,
+                        float hex_size,
+                        std::vector<int> &plateaus_with_columns_out) {
 
   std::vector<Plateau> plateaus = detect_plateaus(heightmap, width, height);
   std::vector<HexColumn> columns;
 
   SDL_Log("Starting column generation with hex_size=%.2f", hex_size);
 
+  plateaus_with_columns_out.clear();
+
   for (size_t p = 0; p < plateaus.size(); ++p) {
     const auto &plateau = plateaus[p];
-    SDL_Log("Plateau %zu: center=(%.1f,%.1f) height=%.3f pixels=%zu", p,
-            plateau.center_x, plateau.center_y, plateau.height,
-            plateau.pixels.size());
 
     std::unordered_set<int> plateau_set(plateau.pixels.begin(),
                                         plateau.pixels.end());
 
     HexCoord center =
         pixel_to_hex(plateau.center_x, plateau.center_y, hex_size);
-    SDL_Log("  Center hex: q=%d r=%d", center.q, center.r);
 
     float cx, cy;
     hex_to_pixel(center.q, center.r, hex_size, cx, cy);
-    SDL_Log("  Center hex back to pixel: (%.1f,%.1f)", cx, cy);
 
     bool fits = hex_fits_in_plateau(center.q, center.r, hex_size, plateau_set,
                                     width, height);
-    SDL_Log("  Center hex fits: %s", fits ? "YES" : "NO");
 
-    if (!fits)
+    if (!fits) {
       continue;
+    }
+
+    int columns_before = columns.size();
 
     std::unordered_map<HexCoord, bool, HexHash> placed;
     std::queue<HexCoord> to_check;
-
     to_check.push(center);
     placed[center] = false;
 
     const int neighbors[6][2] = {{1, 0},  {0, 1},  {-1, 1},
                                  {-1, 0}, {0, -1}, {1, -1}};
 
-    int added = 0;
     while (!to_check.empty()) {
       HexCoord hc = to_check.front();
       to_check.pop();
@@ -270,7 +185,6 @@ std::vector<HexColumn> generate_basalt_columns(std::span<const float> heightmap,
 
         columns.push_back(
             {hc.q, hc.r, plateau.height + variation, plateau.height});
-        added++;
 
         for (auto [dq, dr] : neighbors) {
           HexCoord neighbor = {hc.q + dq, hc.r + dr};
@@ -284,8 +198,15 @@ std::vector<HexColumn> generate_basalt_columns(std::span<const float> heightmap,
       }
     }
 
-    SDL_Log("  Added %d columns for this plateau", added);
+    int added = columns.size() - columns_before;
+    if (added > 0) {
+      plateaus_with_columns_out.push_back(p);
+      SDL_Log("  Added %d columns for plateau %zu", added, p);
+    }
   }
+
+  SDL_Log("Generated %zu columns for %zu plateaus", columns.size(),
+          plateaus_with_columns_out.size());
 
   for (auto &col : columns) {
     for (int i = 0; i < 6; ++i) {
@@ -295,7 +216,6 @@ std::vector<HexColumn> generate_basalt_columns(std::span<const float> heightmap,
   }
 
   compute_visible_edges(columns);
-
   return columns;
 }
 

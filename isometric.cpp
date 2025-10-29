@@ -1,5 +1,7 @@
 #include "isometric.h"
 #include "basalt.h"
+#include "plateau.h"
+#include "water.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>
@@ -56,8 +58,15 @@ IsometricView create_isometric_heightmap(
 
   const float HEX_SIZE = 8.0f;
 
-  std::vector<HexColumn> columns =
-      generate_basalt_columns(heightmap, map_width, map_height, HEX_SIZE);
+  std::vector<Plateau> plateaus =
+      detect_plateaus(heightmap, map_width, map_height);
+
+  std::vector<int> plateaus_with_columns;
+  std::vector<HexColumn> columns = generate_basalt_columns(
+      heightmap, map_width, map_height, HEX_SIZE, plateaus_with_columns);
+
+  std::vector<WaterBody> water_bodies = identify_water_bodies(
+      heightmap, map_width, map_height, plateaus, plateaus_with_columns);
 
   if (columns.empty()) {
     SDL_Log("Warning: No columns generated, creating fallback view");
@@ -69,7 +78,6 @@ IsometricView create_isometric_heightmap(
     return view;
   }
 
-  // Calculate bounds
   float min_x = 1e9f, max_x = -1e9f;
   float min_y = 1e9f, max_y = -1e9f;
 
@@ -77,7 +85,6 @@ IsometricView create_isometric_heightmap(
     Vec2 corners[6];
     get_hex_corners(col.q, col.r, HEX_SIZE, corners);
 
-    // Check all 6 corners at both top and bottom height
     for (int i = 0; i < 6; ++i) {
       float iso_x, iso_y;
       world_to_iso(corners[i].x, corners[i].y, col.height, iso_x, iso_y,
@@ -106,6 +113,10 @@ IsometricView create_isometric_heightmap(
 
   render_basalt_columns(view.pixels, view_width, view_height, columns, HEX_SIZE,
                         offset_x, offset_y, params, palette);
+
+  float time = SDL_GetTicks() / 1000.0f;
+  render_water(view.pixels, view_width, view_height, water_bodies, offset_x,
+               offset_y, params, time);
 
   uint32_t line_color = ((uint8_t)(contour_opacity * 255) << 24) | 0x00DDDDDD;
 

@@ -1,7 +1,7 @@
 #pragma once
 #include "isometric.h"
-#include <cstdint>
-#include <span>
+#include "plateau.h"
+#include "types.h"
 #include <vector>
 
 struct HexColumn {
@@ -12,9 +12,10 @@ struct HexColumn {
   float edge_drops[6];
 };
 
-std::vector<HexColumn> generate_basalt_columns(std::span<const float> heightmap,
-                                               int width, int height,
-                                               float hex_size);
+std::vector<HexColumn>
+generate_basalt_columns(std::span<const float> heightmap, int width, int height,
+                        float hex_size,
+                        std::vector<int> &plateaus_with_columns_out);
 void get_hex_corners(int q, int r, float hex_size, Vec2 corners[6]);
 void render_basalt_columns(std::vector<uint32_t> &pixels, int view_width,
                            int view_height,
