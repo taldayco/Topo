@@ -29,6 +29,7 @@ add_executable(topogen
     basalt.cpp
     plateau.cpp
     water.cpp
+    terrain_generator.cpp
 )
 
 target_link_libraries(topogen PRIVATE SDL3::SDL3 imgui)

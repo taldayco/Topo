@@ -1,5 +1,4 @@
 #include "basalt.h"
-#include "isometric.h"
 #include "palettes.h"
 #include "plateau.h"
 #include "types.h"
@@ -57,13 +56,15 @@ static HexCoord pixel_to_hex(float x, float y, float hex_size) {
 }
 
 void get_hex_corners(int q, int r, float hex_size, Vec2 corners[6]) {
-  // ... existing code
-  const float PI = 3.14159f;
+  const float PI = 3.14159265359f;
+  const float SQRT3 = 1.73205080757f;
+
   float cx, cy;
   hex_to_pixel(q, r, hex_size, cx, cy);
 
+  // Flat-topped hexagon corners
   for (int i = 0; i < 6; ++i) {
-    float angle = i * PI / 3.0f;
+    float angle = i * PI / 3.0f; // 60 degrees per corner
     corners[i].x = cx + hex_size * std::cos(angle);
     corners[i].y = cy + hex_size * std::sin(angle);
   }
@@ -142,6 +143,34 @@ generate_basalt_columns(std::span<const float> heightmap, int width, int height,
 
   for (size_t p = 0; p < plateaus.size(); ++p) {
     const auto &plateau = plateaus[p];
+
+    // Skip small plateaus that might be rivers
+    if (plateau.pixels.size() < 300) { // Increased threshold
+      SDL_Log("  Skipping small plateau %zu (size=%zu)", p,
+              plateau.pixels.size());
+      continue;
+    }
+
+    float min_x = 1e9f, max_x = -1e9f;
+    float min_y = 1e9f, max_y = -1e9f;
+    for (int idx : plateau.pixels) {
+      int x = idx % width;
+      int y = idx / width;
+      min_x = std::min(min_x, (float)x);
+      max_x = std::max(max_x, (float)x);
+      min_y = std::min(min_y, (float)y);
+      max_y = std::max(max_y, (float)y);
+    }
+
+    float w = max_x - min_x + 1;
+    float h = max_y - min_y + 1;
+    float aspect_ratio = std::max(w / h, h / w);
+
+    if (aspect_ratio > 3.0f) {
+      SDL_Log("  Skipping elongated plateau %zu (aspect=%.2f)", p,
+              aspect_ratio);
+      continue;
+    }
 
     std::unordered_set<int> plateau_set(plateau.pixels.begin(),
                                         plateau.pixels.end());
@@ -242,12 +271,10 @@ static bool point_in_hex(float px, float py, const IsoVec2 corners[6]) {
   return inside;
 }
 
-// Fill hexagon top face
 static void draw_filled_hex_top(std::vector<uint32_t> &pixels, int width,
                                 int height, const IsoVec2 iso_corners[6],
                                 float offset_x, float offset_y,
                                 uint32_t color) {
-  // Find bounding box
   float min_x = 1e9f, max_x = -1e9f;
   float min_y = 1e9f, max_y = -1e9f;
 
@@ -265,7 +292,6 @@ static void draw_filled_hex_top(std::vector<uint32_t> &pixels, int width,
   int start_y = std::max(0, (int)min_y);
   int end_y = std::min(height - 1, (int)max_y + 1);
 
-  // Scanline fill
   for (int py = start_y; py <= end_y; ++py) {
     for (int px = start_x; px <= end_x; ++px) {
       float test_x = px - offset_x;
@@ -287,7 +313,6 @@ static void draw_side_face_filled(std::vector<uint32_t> &pixels, int width,
   if (top_height - bottom_height < 0.01f)
     return;
 
-  // Project corners
   IsoVec2 top0, top1, bot0, bot1;
   world_to_iso(corner0.x, corner0.y, top_height, top0.x, top0.y, params);
   world_to_iso(corner1.x, corner1.y, top_height, top1.x, top1.y, params);
@@ -303,14 +328,12 @@ static void draw_side_face_filled(std::vector<uint32_t> &pixels, int width,
   bot1.x += offset_x;
   bot1.y += offset_y;
 
-  // Darken for side face
   float darkness = 0.4f;
   uint8_t r = ((base_color >> 16) & 0xFF) * (1.0f - darkness);
   uint8_t g = ((base_color >> 8) & 0xFF) * (1.0f - darkness);
   uint8_t b = (base_color & 0xFF) * (1.0f - darkness);
   uint32_t side_color = 0xFF000000 | (r << 16) | (g << 8) | b;
 
-  // Scanline fill - interpolate between left and right edges
   float min_y = std::min({top0.y, top1.y, bot0.y, bot1.y});
   float max_y = std::max({top0.y, top1.y, bot0.y, bot1.y});
 
@@ -321,7 +344,6 @@ static void draw_side_face_filled(std::vector<uint32_t> &pixels, int width,
     float intersections[4];
     int count = 0;
 
-    // Check all 4 edges for intersection with scanline
     auto check_edge = [&](IsoVec2 a, IsoVec2 b) {
       if ((a.y <= py && b.y > py) || (b.y <= py && a.y > py)) {
         float t = (py - a.y) / (b.y - a.y);
@@ -335,7 +357,6 @@ static void draw_side_face_filled(std::vector<uint32_t> &pixels, int width,
     check_edge(bot0, top0);
 
     if (count >= 2) {
-      // Sort intersections
       if (count > 2) {
         std::sort(intersections, intersections + count);
       }
@@ -343,7 +364,6 @@ static void draw_side_face_filled(std::vector<uint32_t> &pixels, int width,
         std::swap(intersections[0], intersections[1]);
       }
 
-      // Fill between leftmost and rightmost
       int x_start = std::max(0, (int)intersections[0]);
       int x_end = std::min(width - 1, (int)intersections[count - 1]);
 
