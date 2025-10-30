@@ -430,6 +430,30 @@ noise.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/noise.cpp.s
 .PHONY : noise.cpp.s
 
+plateau.o: plateau.cpp.o
+.PHONY : plateau.o
+
+# target to build an object file
+plateau.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/plateau.cpp.o
+.PHONY : plateau.cpp.o
+
+plateau.i: plateau.cpp.i
+.PHONY : plateau.i
+
+# target to preprocess a source file
+plateau.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/plateau.cpp.i
+.PHONY : plateau.cpp.i
+
+plateau.s: plateau.cpp.s
+.PHONY : plateau.s
+
+# target to generate assembly for a file
+plateau.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/plateau.cpp.s
+.PHONY : plateau.cpp.s
+
 render.o: render.cpp.o
 .PHONY : render.o
 
@@ -453,6 +477,54 @@ render.s: render.cpp.s
 render.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/render.cpp.s
 .PHONY : render.cpp.s
+
+terrain_generator.o: terrain_generator.cpp.o
+.PHONY : terrain_generator.o
+
+# target to build an object file
+terrain_generator.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/terrain_generator.cpp.o
+.PHONY : terrain_generator.cpp.o
+
+terrain_generator.i: terrain_generator.cpp.i
+.PHONY : terrain_generator.i
+
+# target to preprocess a source file
+terrain_generator.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/terrain_generator.cpp.i
+.PHONY : terrain_generator.cpp.i
+
+terrain_generator.s: terrain_generator.cpp.s
+.PHONY : terrain_generator.s
+
+# target to generate assembly for a file
+terrain_generator.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/terrain_generator.cpp.s
+.PHONY : terrain_generator.cpp.s
+
+water.o: water.cpp.o
+.PHONY : water.o
+
+# target to build an object file
+water.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/water.cpp.o
+.PHONY : water.cpp.o
+
+water.i: water.cpp.i
+.PHONY : water.i
+
+# target to preprocess a source file
+water.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/water.cpp.i
+.PHONY : water.cpp.i
+
+water.s: water.cpp.s
+.PHONY : water.s
+
+# target to generate assembly for a file
+water.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/water.cpp.s
+.PHONY : water.cpp.s
 
 # Help Target
 help:
@@ -500,9 +572,18 @@ help:
 	@echo "... noise.o"
 	@echo "... noise.i"
 	@echo "... noise.s"
+	@echo "... plateau.o"
+	@echo "... plateau.i"
+	@echo "... plateau.s"
 	@echo "... render.o"
 	@echo "... render.i"
 	@echo "... render.s"
+	@echo "... terrain_generator.o"
+	@echo "... terrain_generator.i"
+	@echo "... terrain_generator.s"
+	@echo "... water.o"
+	@echo "... water.i"
+	@echo "... water.s"
 .PHONY : help
 
 

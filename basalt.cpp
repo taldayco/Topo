@@ -2,6 +2,7 @@
 #include "palettes.h"
 #include "plateau.h"
 #include "types.h"
+#include "util.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>
@@ -9,11 +10,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-
-static uint32_t hash2d(int x, int y) {
-  uint32_t h = (x * 374761393) ^ (y * 668265263);
-  return (h ^ (h >> 13)) * 1274126177;
-}
 
 struct HexCoord {
   int q, r;

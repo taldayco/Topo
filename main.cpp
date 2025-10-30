@@ -1,3 +1,4 @@
+#include "config.h"
 #include "contour.h"
 #include "detail.h"
 #include "noise.h"
@@ -9,15 +10,13 @@
 #include <imgui_impl_sdlgpu3.h>
 #include <vector>
 
-constexpr int MAP_WIDTH = 512;
-constexpr int MAP_HEIGHT = 512;
-constexpr int WINDOW_WIDTH = 1400;
-constexpr int WINDOW_HEIGHT = 1024;
-constexpr NoiseParams DEFAULT_NOISE = {0.003f, 6, 2.0f, 0.5f, 1337, 8};
-constexpr float DEFAULT_CONTOUR_INTERVAL = 0.05f;
+constexpr NoiseParams DEFAULT_NOISE = {
+    Config::DEFAULT_NOISE_SCALE, Config::DEFAULT_NOISE_OCTAVES,
+    Config::DEFAULT_NOISE_LACUNARITY, Config::DEFAULT_NOISE_GAIN,
+    Config::DEFAULT_NOISE_SEED, Config::DEFAULT_NOISE_LEVELS};
 constexpr bool DEFAULT_ISOMETRIC = true;
 
-static float iso_padding = 50.0f;
+static float iso_padding = Config::DEFAULT_ISO_PADDING;
 static float iso_offset_x_adjust = 0.0f;
 static float iso_offset_y_adjust = 0.0f;
 static SDL_Window *window = nullptr;
@@ -26,11 +25,11 @@ static TextureHandle map_texture = {};
 static std::vector<float> heightmap;
 static std::vector<Line> contour_lines;
 static NoiseParams noise_params = DEFAULT_NOISE;
-static float contour_interval = DEFAULT_CONTOUR_INTERVAL;
+static float contour_interval = Config::DEFAULT_CONTOUR_INTERVAL;
 static bool use_isometric = DEFAULT_ISOMETRIC;
 static bool need_regenerate = true;
 static int current_palette = 0;
-static float contour_opacity = 0.25f;
+static float contour_opacity = Config::DEFAULT_CONTOUR_OPACITY;
 static DetailParams detail_params = {};
 
 bool init() {
@@ -38,8 +37,8 @@ bool init() {
   if (!SDL_Init(SDL_INIT_VIDEO))
     return false;
 
-  window = SDL_CreateWindow("Topographical Map Generator", WINDOW_WIDTH,
-                            WINDOW_HEIGHT, 0);
+  window = SDL_CreateWindow("Topographical Map Generator", Config::WINDOW_WIDTH,
+                            Config::WINDOW_HEIGHT, 0);
   if (!window)
     return false;
 
@@ -71,7 +70,7 @@ bool init() {
 
   ImGui_ImplSDLGPU3_Init(&init_info);
 
-  heightmap.resize(MAP_WIDTH * MAP_HEIGHT);
+  heightmap.resize(Config::MAP_WIDTH * Config::MAP_HEIGHT);
 
   SDL_Log("Init complete");
   return true;
@@ -81,13 +80,13 @@ void regenerate_map() {
   SDL_Log("Starting regeneration...");
   auto start = SDL_GetTicks();
 
-  generate_heightmap(heightmap, MAP_WIDTH, MAP_HEIGHT, noise_params);
+  generate_heightmap(heightmap, Config::MAP_WIDTH, Config::MAP_HEIGHT, noise_params);
 
   auto after_heightmap = SDL_GetTicks();
   SDL_Log("Heightmap: %llu ms", after_heightmap - start);
 
   contour_lines.clear();
-  extract_contours(heightmap, MAP_WIDTH, MAP_HEIGHT, contour_interval,
+  extract_contours(heightmap, Config::MAP_WIDTH, Config::MAP_HEIGHT, contour_interval,
                    contour_lines);
 
   auto after_contours = SDL_GetTicks();
@@ -100,7 +99,7 @@ void regenerate_map() {
 
   SDL_Log("Creating texture with lines...");
   map_texture = create_texture_from_heightmap(
-      gpu_device, heightmap, contour_lines, MAP_WIDTH, MAP_HEIGHT,
+      gpu_device, heightmap, contour_lines, Config::MAP_WIDTH, Config::MAP_HEIGHT,
       use_isometric, PALETTES[current_palette], detail_params, contour_opacity,
       iso_padding, iso_offset_x_adjust, iso_offset_y_adjust);
   SDL_Log("Texture created");
@@ -128,7 +127,7 @@ void render_ui() {
   ImGui::NewFrame();
 
   ImGui::SetNextWindowPos({0, 0}, ImGuiCond_Always);
-  ImGui::SetNextWindowSize({1024, 1024}, ImGuiCond_Always);
+  ImGui::SetNextWindowSize({(float)Config::WINDOW_HEIGHT, (float)Config::WINDOW_HEIGHT}, ImGuiCond_Always);
   ImGui::Begin("Map", nullptr,
                ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
                    ImGuiWindowFlags_NoCollapse);
@@ -136,8 +135,8 @@ void render_ui() {
   if (map_texture.texture) {
     float tex_w = map_texture.width;
     float tex_h = map_texture.height;
-    float window_w = 1024.0f;
-    float window_h = 1024.0f;
+    float window_w = (float)Config::WINDOW_HEIGHT;
+    float window_h = (float)Config::WINDOW_HEIGHT;
 
     float scale = std::min(window_w / tex_w, window_h / tex_h);
     float display_w = tex_w * scale;
@@ -154,8 +153,8 @@ void render_ui() {
 
   ImGui::End();
 
-  ImGui::SetNextWindowPos({1024, 0}, ImGuiCond_Always);
-  ImGui::SetNextWindowSize({376, 1024}, ImGuiCond_Always);
+  ImGui::SetNextWindowPos({(float)Config::WINDOW_HEIGHT, 0}, ImGuiCond_Always);
+  ImGui::SetNextWindowSize({(float)Config::UI_PANEL_WIDTH, (float)Config::WINDOW_HEIGHT}, ImGuiCond_Always);
   ImGui::Begin("Controls", nullptr,
                ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
 
@@ -207,7 +206,7 @@ void render_ui() {
   ImGui::SameLine();
   if (ImGui::Button("Reset", {175, 40})) {
     noise_params = DEFAULT_NOISE;
-    contour_interval = DEFAULT_CONTOUR_INTERVAL;
+    contour_interval = Config::DEFAULT_CONTOUR_INTERVAL;
     use_isometric = DEFAULT_ISOMETRIC;
     current_palette = 0;
     need_regenerate = true;
@@ -216,7 +215,7 @@ void render_ui() {
   ImGui::Separator();
   ImGui::Text("Stats");
   ImGui::Text("Lines: %zu", contour_lines.size());
-  ImGui::Text("Resolution: %dx%d", MAP_WIDTH, MAP_HEIGHT);
+  ImGui::Text("Resolution: %dx%d", Config::MAP_WIDTH, Config::MAP_HEIGHT);
 
   ImGui::End();
   ImGui::Render();
@@ -275,11 +274,7 @@ int main() {
 
   SDL_Log("Entering main loop");
   bool running = true;
-  int frame = 0;
   while (running) {
-    if (frame % 60 == 0)
-      SDL_Log("Frame %d", frame);
-    frame++;
 
     if (need_regenerate)
       regenerate_map();

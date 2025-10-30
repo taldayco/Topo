@@ -1,11 +1,7 @@
 #include "detail.h"
+#include "util.h"
 #include <algorithm>
 #include <cmath>
-
-static uint32_t hash2d(int x, int y) {
-  uint32_t h = (x * 374761393) ^ (y * 668265263);
-  return (h ^ (h >> 13)) * 1274126177;
-}
 
 static void apply_dither(std::vector<uint32_t> &pixels, int width, int height,
                          float strength) {

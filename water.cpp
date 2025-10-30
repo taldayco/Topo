@@ -2,6 +2,7 @@
 #include "basalt.h"
 #include "config.h"
 #include "plateau.h"
+#include "util.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>
@@ -12,9 +13,6 @@
 #include <unordered_set>
 #include <vector>
 
-static uint32_t hash_plateau(int idx) {
-  return (idx * 374761393u) ^ 668265263u;
-}
 static bool pixel_in_hex(float px, float py, int q, int r, float hex_size) {
   Vec2 corners[6];
   get_hex_corners(q, r, hex_size, corners);
@@ -481,8 +479,6 @@ filter_water_channels(const std::vector<ChannelRegion> &regions,
     fill_holes_in_region(candidate, width, height);
   }
 
-  SDL_Log("Phase 3.1: Filtered %zu water channel candidates from %zu regions",
-          candidates.size(), regions.size());
   return candidates;
 }
 
@@ -544,7 +540,7 @@ static WaterBody channel_to_water_body(const ChannelRegion &channel,
   water.aspect_ratio = channel.aspect_ratio;
   water.pixels = channel.pixels;
   densify_region(water.pixels, width, height);
-  water.time_offset = (hash_plateau(channel_idx) % 1000) / 1000.0f * 6.283185f;
+  water.time_offset = (hash1d(channel_idx) % 1000) / 1000.0f * 6.283185f;
 
   build_triangle_mesh_from_polygon(poly, water.height, water.mesh);
 
@@ -647,7 +643,7 @@ identify_water_bodies(std::span<const float> heightmap, int width, int height,
     float w = max_x - min_x + 1.f, h = max_y - min_y + 1.f;
     water.aspect_ratio = std::max(w, h) / std::max(1.0f, std::min(w, h));
     water.pixels = plat.pixels;
-    water.time_offset = (hash_plateau(pi) % 1000) / 1000.0f * 6.283185f;
+    water.time_offset = (hash1d(pi) % 1000) / 1000.0f * 6.283185f;
 
     build_triangle_mesh_from_polygon(poly_world, water.height, water.mesh);
 
@@ -702,8 +698,8 @@ void render_water(std::vector<uint32_t> &pixels, int view_w, int view_h,
 
   for (const auto &water : water_bodies) {
     for (int idx : water.pixels) {
-      int px = idx % 512;
-      int py = idx / 512;
+      int px = idx % Config::MAP_WIDTH;
+      int py = idx / Config::MAP_WIDTH;
 
       float z = get_water_height(px, py, water.height, time, water.time_offset);
 
@@ -721,9 +717,11 @@ void render_water(std::vector<uint32_t> &pixels, int view_w, int view_h,
       uint8_t b = (uint8_t)((Config::WATER_COLOR & 0xFF) * depth_factor);
       uint32_t color = 0xFF000000 | (r << 16) | (g << 8) | b;
 
-      // Draw with larger kernel for coverage
-      for (int dy = -5; dy <= 5; ++dy) {
-        for (int dx = -5; dx <= 5; ++dx) {
+      // Draw with circular kernel (radius 2) for coverage - ~13 pixels instead of 121
+      for (int dy = -2; dy <= 2; ++dy) {
+        for (int dx = -2; dx <= 2; ++dx) {
+          if (dx * dx + dy * dy > 4)
+            continue; // Skip corners, keep circular
           int x = (int)iso_x + dx;
           int y = (int)iso_y + dy;
           if (x >= 0 && x < view_w && y >= 0 && y < view_h) {
@@ -736,6 +734,4 @@ void render_water(std::vector<uint32_t> &pixels, int view_w, int view_h,
       }
     }
   }
-
-  SDL_Log("Rendered %zu water bodies", water_bodies.size());
 }

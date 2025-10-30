@@ -71,3 +71,7 @@ imgui/
 # Backup files
 *.bak
 *.tmp
+
+# Claude-specific files
+claude_to_do.md
+CLAUDE.md

@@ -1,4 +1,5 @@
 #include "render.h"
+#include "config.h"
 #include "detail.h"
 #include <algorithm>
 #include <cmath>
@@ -63,15 +64,14 @@ TextureHandle create_texture_from_heightmap(
     const DetailParams &detail_params, float contour_opacity, float iso_padding,
     float iso_offset_x_adjust, float iso_offset_y_adjust) {
 
-  auto start = SDL_GetTicks();
   std::vector<uint32_t> pixels;
   int tex_width, tex_height;
 
   if (use_isometric) {
     IsometricParams params;
-    params.tile_width = 2.0f;
-    params.tile_height = 1.0f;
-    params.height_scale = 100.0f;
+    params.tile_width = Config::ISO_TILE_WIDTH;
+    params.tile_height = Config::ISO_TILE_HEIGHT;
+    params.height_scale = Config::ISO_HEIGHT_SCALE;
 
     IsometricView iso_view = create_isometric_heightmap(
         heightmap, contour_lines, width, height, params, palette,
@@ -151,10 +151,6 @@ TextureHandle create_texture_from_heightmap(
     }
   }
 
-  auto after_render = SDL_GetTicks();
-  SDL_Log("Rendering: %llu ms for %zu lines", after_render - start,
-          contour_lines.size());
-
   SDL_GPUTextureCreateInfo tex_info = {};
   tex_info.type = SDL_GPU_TEXTURETYPE_2D;
   tex_info.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
@@ -165,6 +161,10 @@ TextureHandle create_texture_from_heightmap(
   tex_info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
 
   SDL_GPUTexture *texture = SDL_CreateGPUTexture(device, &tex_info);
+  if (!texture) {
+    SDL_Log("Failed to create GPU texture");
+    return {};
+  }
 
   SDL_GPUTransferBufferCreateInfo transfer_info = {};
   transfer_info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
@@ -172,7 +172,19 @@ TextureHandle create_texture_from_heightmap(
 
   SDL_GPUTransferBuffer *transfer =
       SDL_CreateGPUTransferBuffer(device, &transfer_info);
+  if (!transfer) {
+    SDL_Log("Failed to create transfer buffer");
+    SDL_ReleaseGPUTexture(device, texture);
+    return {};
+  }
+
   void *data = SDL_MapGPUTransferBuffer(device, transfer, false);
+  if (!data) {
+    SDL_Log("Failed to map transfer buffer");
+    SDL_ReleaseGPUTransferBuffer(device, transfer);
+    SDL_ReleaseGPUTexture(device, texture);
+    return {};
+  }
   SDL_memcpy(data, pixels.data(), transfer_info.size);
   SDL_UnmapGPUTransferBuffer(device, transfer);
 
@@ -204,6 +216,11 @@ TextureHandle create_texture_from_heightmap(
   sampler_info.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
 
   SDL_GPUSampler *sampler = SDL_CreateGPUSampler(device, &sampler_info);
+  if (!sampler) {
+    SDL_Log("Failed to create GPU sampler");
+    SDL_ReleaseGPUTexture(device, texture);
+    return {};
+  }
 
   TextureHandle handle;
   handle.texture = texture;
