@@ -44,7 +44,7 @@ struct WaveParams {
 };
 
 std::vector<ChannelRegion>
-extract_channel_spaces(const std::vector<HexColumn> &columns, int width,
+extract_channel_spaces(std::span<const int16_t> terrain_map, int width,
                        int height, std::span<const float> heightmap);
 
 std::vector<ChannelRegion>

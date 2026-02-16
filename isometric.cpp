@@ -2,6 +2,7 @@
 #include "basalt.h"
 #include "config.h"
 #include "terrain_generator.h"
+#include "util.h"
 #include "water.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -91,6 +92,50 @@ IsometricView create_isometric_heightmap(
 
   float offset_x = -min_x + padding + offset_x_adjust;
   float offset_y = -min_y + padding + offset_y_adjust;
+
+  // Debug: draw unused regions with translucent per-region colors (before
+  // basalt/water so they occlude)
+  if (Config::enable_debug_overlay) {
+    constexpr float ALPHA = 0.35f;
+    for (size_t ri = 0; ri < terrain.unused_regions.size(); ++ri) {
+      uint32_t h = hash1d((int)ri);
+      uint8_t cr = 80 + (h & 0x7F);
+      uint8_t cg = 80 + ((h >> 8) & 0x7F);
+      uint8_t cb = 80 + ((h >> 16) & 0x7F);
+
+      for (int idx : terrain.unused_regions[ri].pixels) {
+        int wx = idx % map_width;
+        int wy = idx / map_width;
+        float z = heightmap[idx];
+
+        float iso_x, iso_y;
+        world_to_iso((float)wx, (float)wy, z, iso_x, iso_y, params);
+        int sx = (int)(iso_x + offset_x);
+        int sy = (int)(iso_y + offset_y);
+
+        constexpr int R = 2;
+        for (int dy = -R; dy <= R; ++dy) {
+          for (int dx = -R; dx <= R; ++dx) {
+            if (dx * dx + dy * dy > R * R)
+              continue;
+            int px = sx + dx;
+            int py = sy + dy;
+            if (px >= 0 && px < view_width && py >= 0 && py < view_height) {
+              uint32_t dst = view.pixels[py * view_width + px];
+              uint8_t dr = (dst >> 16) & 0xFF;
+              uint8_t dg = (dst >> 8) & 0xFF;
+              uint8_t db = dst & 0xFF;
+              uint8_t out_r = (uint8_t)(cr * ALPHA + dr * (1.0f - ALPHA));
+              uint8_t out_g = (uint8_t)(cg * ALPHA + dg * (1.0f - ALPHA));
+              uint8_t out_b = (uint8_t)(cb * ALPHA + db * (1.0f - ALPHA));
+              view.pixels[py * view_width + px] =
+                  0xFF000000 | (out_r << 16) | (out_g << 8) | out_b;
+            }
+          }
+        }
+      }
+    }
+  }
 
   render_basalt_columns(view.pixels, view_width, view_height, terrain.columns,
                         Config::HEX_SIZE, offset_x, offset_y, params, palette);

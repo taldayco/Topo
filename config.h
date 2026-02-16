@@ -3,7 +3,10 @@
 
 struct Config {
   // Toggle ImGui UI (false = plain SDL window with just the map)
-  static constexpr bool use_IMGUI = false;
+  static constexpr bool use_IMGUI = true;
+
+  // Toggle debug overlay for unused regions
+  static inline bool enable_debug_overlay = true;
 
   // Map dimensions (base heightmap resolution for quality)
   static inline int MAP_WIDTH = 1024;

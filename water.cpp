@@ -1,6 +1,7 @@
 #include "water.h"
 #include "basalt.h"
 #include "config.h"
+#include "terrain_generator.h"
 #include "util.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -11,26 +12,6 @@
 #include <random>
 #include <unordered_set>
 #include <vector>
-
-static bool pixel_in_hex(float px, float py, int q, int r, float hex_size) {
-  Vec2 corners[6];
-  get_hex_corners(q, r, hex_size, corners);
-
-  bool inside = true;
-  for (int i = 0; i < 6; ++i) {
-    int next = (i + 1) % 6;
-    float edge_x = corners[next].x - corners[i].x;
-    float edge_y = corners[next].y - corners[i].y;
-    float to_point_x = px - corners[i].x;
-    float to_point_y = py - corners[i].y;
-    float cross = edge_x * to_point_y - edge_y * to_point_x;
-    if (cross < 0) {
-      inside = false;
-      break;
-    }
-  }
-  return inside;
-}
 struct P2 {
   float x, y;
 };
@@ -195,54 +176,23 @@ static void build_triangle_mesh_from_polygon(const std::vector<P2> &poly,
 }
 
 std::vector<ChannelRegion>
-extract_channel_spaces(const std::vector<HexColumn> &columns, int width,
+extract_channel_spaces(std::span<const int16_t> terrain_map, int width,
                        int height, std::span<const float> heightmap) {
 
-  SDL_Log("Phase 1.1: Extracting channel spaces from %zu columns",
-          columns.size());
-
-  std::vector<uint8_t> column_mask(width * height, 0);
-  int column_pixels = 0;
-
-  for (const auto &col : columns) {
-    Vec2 corners[6];
-    get_hex_corners(col.q, col.r, Config::HEX_SIZE, corners);
-
-    float min_x = 1e9f, max_x = -1e9f;
-    float min_y = 1e9f, max_y = -1e9f;
-    for (int i = 0; i < 6; ++i) {
-      min_x = std::min(min_x, corners[i].x);
-      max_x = std::max(max_x, corners[i].x);
-      min_y = std::min(min_y, corners[i].y);
-      max_y = std::max(max_y, corners[i].y);
-    }
-
-    int x0 = std::max(0, (int)min_x - 1);
-    int x1 = std::min(width - 1, (int)max_x + 1);
-    int y0 = std::max(0, (int)min_y - 1);
-    int y1 = std::min(height - 1, (int)max_y + 1);
-
-    for (int y = y0; y <= y1; ++y) {
-      for (int x = x0; x <= x1; ++x) {
-        if (pixel_in_hex(x, y, col.q, col.r, Config::HEX_SIZE)) {
-          int idx = y * width + x;
-          if (!column_mask[idx]) {
-            column_mask[idx] = 1;
-            column_pixels++;
-          }
-        }
-      }
-    }
-  }
+  SDL_Log("Phase 1.1: Extracting channel spaces from terrain_map");
 
   int total_pixels = width * height;
-  int channel_pixels = total_pixels - column_pixels;
-  SDL_Log("  Column pixels: %d / %d (%.1f%%)", column_pixels, total_pixels,
-          100.0f * column_pixels / total_pixels);
+  int basalt_pixels = 0;
+  for (int i = 0; i < total_pixels; ++i)
+    if (terrain_map[i] == TERRAIN_BASALT)
+      basalt_pixels++;
+  int channel_pixels = total_pixels - basalt_pixels;
+  SDL_Log("  Basalt pixels: %d / %d (%.1f%%)", basalt_pixels, total_pixels,
+          100.0f * basalt_pixels / total_pixels);
   SDL_Log("  Channel pixels: %d / %d (%.1f%%)", channel_pixels, total_pixels,
           100.0f * channel_pixels / total_pixels);
 
-  // Phase 1.3: Flood fill on channel spaces
+  // Flood fill on empty spaces
   std::vector<uint8_t> visited(width * height, 0);
   std::vector<ChannelRegion> regions;
   const int dirs[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
@@ -250,7 +200,7 @@ extract_channel_spaces(const std::vector<HexColumn> &columns, int width,
   for (int sy = 0; sy < height; ++sy) {
     for (int sx = 0; sx < width; ++sx) {
       int start = sy * width + sx;
-      if (column_mask[start] || visited[start])
+      if (terrain_map[start] == TERRAIN_BASALT || visited[start])
         continue;
 
       float base_elevation = heightmap[start];
@@ -279,7 +229,7 @@ extract_channel_spaces(const std::vector<HexColumn> &columns, int width,
             continue;
           int nidx = ny * width + nx;
 
-          if (!visited[nidx] && !column_mask[nidx]) {
+          if (!visited[nidx] && terrain_map[nidx] != TERRAIN_BASALT) {
             float elevation_diff = std::abs(heightmap[nidx] - base_elevation);
 
             // Allow crossing small elevation differences to capture noise
@@ -295,6 +245,7 @@ extract_channel_spaces(const std::vector<HexColumn> &columns, int width,
       region.min_x = min_x;
       region.max_x = max_x;
       region.min_y = min_y;
+      region.max_y = max_y;
       region.avg_elevation = base_elevation;
 
       float w = max_x - min_x + 1;

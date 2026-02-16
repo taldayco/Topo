@@ -96,6 +96,12 @@ void ui_render(AppState &state, const TextureHandle &map_texture) {
       clamp_pan(state.view);
     }
 
+    // Arrow key pan
+    if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow))  { state.view.pan_x -= 0.05f / state.view.zoom; clamp_pan(state.view); }
+    if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) { state.view.pan_x += 0.05f / state.view.zoom; clamp_pan(state.view); }
+    if (ImGui::IsKeyPressed(ImGuiKey_UpArrow))    { state.view.pan_y -= 0.05f / state.view.zoom; clamp_pan(state.view); }
+    if (ImGui::IsKeyPressed(ImGuiKey_DownArrow))  { state.view.pan_y += 0.05f / state.view.zoom; clamp_pan(state.view); }
+
     // Mouse drag pan
     if (ImGui::IsItemHovered() && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
       ImVec2 delta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left);
@@ -156,6 +162,7 @@ void ui_render(AppState &state, const TextureHandle &map_texture) {
   ImGui::Separator();
   state.need_regenerate |=
       ImGui::Checkbox("Isometric View", &state.use_isometric);
+  ImGui::Checkbox("Debug Overlay", &Config::enable_debug_overlay);
   if (state.use_isometric) {
     state.need_regenerate |=
         ImGui::SliderFloat("Padding", &state.iso_padding, 0.0f, 200.0f);

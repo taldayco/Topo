@@ -1,5 +1,6 @@
 #include "contour.h"
 #include <SDL3/SDL.h>
+#include <algorithm>
 #include <queue>
 
 void extract_contours(std::span<const float> heightmap, int width, int height,
@@ -83,7 +84,8 @@ void extract_contours(std::span<const float> heightmap, int width, int height,
 
 std::vector<Plateau> detect_plateaus(std::span<const int> band_map,
                                      std::span<const float> heightmap,
-                                     int width, int height) {
+                                     int width, int height,
+                                     std::vector<int16_t>& terrain_map) {
 
   std::vector<bool> visited(width * height, false);
   std::vector<Plateau> plateaus;
@@ -96,6 +98,10 @@ std::vector<Plateau> detect_plateaus(std::span<const int> band_map,
 
       int band = band_map[idx];
       Plateau plateau;
+      plateau.min_x = (float)x;
+      plateau.max_x = (float)x;
+      plateau.min_y = (float)y;
+      plateau.max_y = (float)y;
 
       std::queue<int> queue;
       queue.push(idx);
@@ -118,6 +124,11 @@ std::vector<Plateau> detect_plateaus(std::span<const int> band_map,
         sum_height += heightmap[current];
         count++;
 
+        plateau.min_x = std::min(plateau.min_x, (float)cx);
+        plateau.max_x = std::max(plateau.max_x, (float)cx);
+        plateau.min_y = std::min(plateau.min_y, (float)cy);
+        plateau.max_y = std::max(plateau.max_y, (float)cy);
+
         int neighbors[4][2] = {{0, -1}, {-1, 0}, {1, 0}, {0, 1}};
         for (auto [dx, dy] : neighbors) {
           int nx = cx + dx;
@@ -138,6 +149,9 @@ std::vector<Plateau> detect_plateaus(std::span<const int> band_map,
       plateau.center_y = sum_y / count;
 
       if (count > 50) {
+        int16_t plateau_id = (int16_t)(plateaus.size() + 1);
+        for (int px_idx : plateau.pixels)
+          terrain_map[px_idx] = plateau_id;
         plateaus.push_back(plateau);
       }
     }
