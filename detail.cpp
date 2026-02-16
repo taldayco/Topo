@@ -1,5 +1,4 @@
 #include "detail.h"
-#include "util.h"
 #include <algorithm>
 #include <cmath>
 

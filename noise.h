@@ -12,4 +12,4 @@ struct NoiseParams {
 };
 
 void generate_heightmap(std::span<float> out, int width, int height,
-                        const NoiseParams &params);
+                        const NoiseParams &params, float map_scale = 1.0f);

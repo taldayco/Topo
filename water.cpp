@@ -717,7 +717,8 @@ void render_water(std::vector<uint32_t> &pixels, int view_w, int view_h,
       uint8_t b = (uint8_t)((Config::WATER_COLOR & 0xFF) * depth_factor);
       uint32_t color = 0xFF000000 | (r << 16) | (g << 8) | b;
 
-      // Draw with circular kernel (radius 2) for coverage - ~13 pixels instead of 121
+      // Draw with circular kernel (radius 2) for coverage - ~13 pixels instead
+      // of 121
       for (int dy = -2; dy <= 2; ++dy) {
         for (int dx = -2; dx <= 2; ++dx) {
           if (dx * dx + dy * dy > 4)

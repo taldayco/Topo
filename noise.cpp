@@ -5,7 +5,7 @@
 #include <vector>
 
 void generate_heightmap(std::span<float> out, int width, int height,
-                        const NoiseParams &params) {
+                        const NoiseParams &params, float map_scale) {
   // Initialize output and gradient accumulators
   std::vector<float> gradient_x(width * height, 0.0f);
   std::vector<float> gradient_y(width * height, 0.0f);
@@ -27,7 +27,10 @@ void generate_heightmap(std::span<float> out, int width, int height,
     std::vector<float> octave_values(width * height);
     for (int y = 0; y < height; ++y) {
       for (int x = 0; x < width; ++x) {
-        octave_values[y * width + x] = noise.GetNoise((float)x, (float)y);
+        // Apply map_scale to coordinates - this controls zoom level
+        float world_x = (float)x * map_scale;
+        float world_y = (float)y * map_scale;
+        octave_values[y * width + x] = noise.GetNoise(world_x, world_y);
       }
     }
 

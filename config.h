@@ -2,14 +2,23 @@
 #include <stdint.h>
 
 struct Config {
-  // Map dimensions
-  static constexpr int MAP_WIDTH = 512;
-  static constexpr int MAP_HEIGHT = 512;
+  // Map dimensions (base heightmap resolution for quality)
+  static inline int MAP_WIDTH = 1024;
+  static inline int MAP_HEIGHT = 1024;
 
-  // Window dimensions
-  static constexpr int WINDOW_WIDTH = 1400;
-  static constexpr int WINDOW_HEIGHT = 1024;
-  static constexpr int UI_PANEL_WIDTH = 376;
+  // Window dimensions (runtime-calculated)
+  static inline int WINDOW_WIDTH = 1450;
+  static inline int WINDOW_HEIGHT = 1024;
+  static inline int UI_PANEL_WIDTH = 376;
+
+  // Display size percentages
+  static constexpr float WINDOW_WIDTH_PERCENT = 0.85f;  // 85% of display width
+  static constexpr float WINDOW_HEIGHT_PERCENT = 0.85f; // 85% of display height
+  static constexpr float UI_PANEL_WIDTH_PERCENT = 0.25f; // 25% of window width
+  static constexpr int UI_PANEL_MIN_WIDTH = 400;        // Minimum width for controls
+
+  // Map scale (controls zoom level independent of resolution)
+  static constexpr float DEFAULT_MAP_SCALE = 1.0f;
 
   // Map generation
   static constexpr float HEX_SIZE = 8.0f;

@@ -1,7 +1,6 @@
 #pragma once
 #include "contour.h"
 #include "palettes.h"
-#include "types.h"
 #include <cstdint>
 #include <span>
 #include <vector>

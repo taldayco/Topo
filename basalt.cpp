@@ -98,6 +98,9 @@ static bool hex_fits_in_plateau(int q, int r, float hex_size,
   return false;
 }
 
+// visible edges should only include visibility after isometric params are
+// applied
+
 static void compute_visible_edges(std::vector<HexColumn> &columns) {
   std::unordered_map<HexCoord, HexColumn *, HexHash> col_map;
   for (auto &col : columns) {

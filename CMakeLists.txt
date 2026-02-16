@@ -29,9 +29,12 @@ target_link_libraries(imgui PUBLIC SDL3::SDL3)
 
 add_executable(topogen
     main.cpp
+    gpu.cpp
+    imgui_ui.cpp
+    map_gen.cpp
     noise.cpp
     contour.cpp
-    render.cpp
+    delve_render.cpp
     isometric.cpp
     detail.cpp
     basalt.cpp

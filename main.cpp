@@ -1,288 +1,44 @@
-#include "config.h"
-#include "contour.h"
-#include "detail.h"
-#include "noise.h"
-#include "palettes.h"
-#include "render.h"
-#include <SDL3/SDL.h>
-#include <imgui.h>
-#include <imgui_impl_sdl3.h>
-#include <imgui_impl_sdlgpu3.h>
-#include <vector>
-
-constexpr NoiseParams DEFAULT_NOISE = {
-    Config::DEFAULT_NOISE_SCALE, Config::DEFAULT_NOISE_OCTAVES,
-    Config::DEFAULT_NOISE_LACUNARITY, Config::DEFAULT_NOISE_GAIN,
-    Config::DEFAULT_NOISE_SEED, Config::DEFAULT_NOISE_LEVELS};
-constexpr bool DEFAULT_ISOMETRIC = true;
-
-static float iso_padding = Config::DEFAULT_ISO_PADDING;
-static float iso_offset_x_adjust = 0.0f;
-static float iso_offset_y_adjust = 0.0f;
-static SDL_Window *window = nullptr;
-static SDL_GPUDevice *gpu_device = nullptr;
-static TextureHandle map_texture = {};
-static std::vector<float> heightmap;
-static std::vector<Line> contour_lines;
-static NoiseParams noise_params = DEFAULT_NOISE;
-static float contour_interval = Config::DEFAULT_CONTOUR_INTERVAL;
-static bool use_isometric = DEFAULT_ISOMETRIC;
-static bool need_regenerate = true;
-static int current_palette = 0;
-static float contour_opacity = Config::DEFAULT_CONTOUR_OPACITY;
-static DetailParams detail_params = {};
-
-bool init() {
-  SDL_Log("Init starting...");
-  if (!SDL_Init(SDL_INIT_VIDEO))
-    return false;
-
-  window = SDL_CreateWindow("Topographical Map Generator", Config::WINDOW_WIDTH,
-                            Config::WINDOW_HEIGHT, 0);
-  if (!window)
-    return false;
-
-  gpu_device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, true, nullptr);
-  if (!gpu_device)
-    return false;
-
-  if (!SDL_ClaimWindowForGPUDevice(gpu_device, window))
-    return false;
-
-  SDL_SetGPUSwapchainParameters(gpu_device, window,
-                                SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
-                                SDL_GPU_PRESENTMODE_VSYNC);
-
-  IMGUI_CHECKVERSION();
-  ImGui::CreateContext();
-  ImGuiIO &io = ImGui::GetIO();
-  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-
-  ImGui::StyleColorsDark();
-  ImGui_ImplSDL3_InitForVulkan(window);
-
-  ImGui_ImplSDLGPU3_InitInfo init_info = {};
-  init_info.Device = gpu_device;
-  init_info.ColorTargetFormat =
-      SDL_GetGPUSwapchainTextureFormat(gpu_device, window);
-  init_info.SwapchainComposition = SDL_GPU_SWAPCHAINCOMPOSITION_SDR;
-  init_info.PresentMode = SDL_GPU_PRESENTMODE_VSYNC;
-
-  ImGui_ImplSDLGPU3_Init(&init_info);
-
-  heightmap.resize(Config::MAP_WIDTH * Config::MAP_HEIGHT);
-
-  SDL_Log("Init complete");
-  return true;
-}
-
-void regenerate_map() {
-  SDL_Log("Starting regeneration...");
-  auto start = SDL_GetTicks();
-
-  generate_heightmap(heightmap, Config::MAP_WIDTH, Config::MAP_HEIGHT, noise_params);
-
-  auto after_heightmap = SDL_GetTicks();
-  SDL_Log("Heightmap: %llu ms", after_heightmap - start);
-
-  contour_lines.clear();
-  extract_contours(heightmap, Config::MAP_WIDTH, Config::MAP_HEIGHT, contour_interval,
-                   contour_lines);
-
-  auto after_contours = SDL_GetTicks();
-  SDL_Log("Contours (%zu lines): %llu ms", contour_lines.size(),
-          after_contours - after_heightmap);
-
-  if (map_texture.texture) {
-    release_texture(gpu_device, map_texture);
-  }
-
-  SDL_Log("Creating texture with lines...");
-  map_texture = create_texture_from_heightmap(
-      gpu_device, heightmap, contour_lines, Config::MAP_WIDTH, Config::MAP_HEIGHT,
-      use_isometric, PALETTES[current_palette], detail_params, contour_opacity,
-      iso_padding, iso_offset_x_adjust, iso_offset_y_adjust);
-  SDL_Log("Texture created");
-
-  SDL_WaitForGPUIdle(gpu_device);
-
-  auto end = SDL_GetTicks();
-  SDL_Log("Total regeneration: %llu ms\n", end - start);
-
-  need_regenerate = false;
-}
-
-void process_input(bool &running) {
-  SDL_Event event;
-  while (SDL_PollEvent(&event)) {
-    ImGui_ImplSDL3_ProcessEvent(&event);
-    if (event.type == SDL_EVENT_QUIT)
-      running = false;
-  }
-}
-
-void render_ui() {
-  ImGui_ImplSDLGPU3_NewFrame();
-  ImGui_ImplSDL3_NewFrame();
-  ImGui::NewFrame();
-
-  ImGui::SetNextWindowPos({0, 0}, ImGuiCond_Always);
-  ImGui::SetNextWindowSize({(float)Config::WINDOW_HEIGHT, (float)Config::WINDOW_HEIGHT}, ImGuiCond_Always);
-  ImGui::Begin("Map", nullptr,
-               ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-                   ImGuiWindowFlags_NoCollapse);
-
-  if (map_texture.texture) {
-    float tex_w = map_texture.width;
-    float tex_h = map_texture.height;
-    float window_w = (float)Config::WINDOW_HEIGHT;
-    float window_h = (float)Config::WINDOW_HEIGHT;
-
-    float scale = std::min(window_w / tex_w, window_h / tex_h);
-    float display_w = tex_w * scale;
-    float display_h = tex_h * scale;
-
-    float offset_x = (window_w - display_w) * 0.5f;
-    float offset_y = (window_h - display_h) * 0.5f;
-
-    ImGui::SetCursorPos({offset_x, offset_y});
-    ImGui::Image((ImTextureID)map_texture.texture, {display_w, display_h});
-  } else {
-    ImGui::Text("Generating...");
-  }
-
-  ImGui::End();
-
-  ImGui::SetNextWindowPos({(float)Config::WINDOW_HEIGHT, 0}, ImGuiCond_Always);
-  ImGui::SetNextWindowSize({(float)Config::UI_PANEL_WIDTH, (float)Config::WINDOW_HEIGHT}, ImGuiCond_Always);
-  ImGui::Begin("Controls", nullptr,
-               ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
-
-  ImGui::Text("Noise Parameters");
-  need_regenerate |=
-      ImGui::SliderFloat("Frequency", &noise_params.frequency, 0.001f, 0.05f);
-  need_regenerate |= ImGui::SliderInt("Octaves", &noise_params.octaves, 1, 8);
-  need_regenerate |=
-      ImGui::SliderFloat("Lacunarity", &noise_params.lacunarity, 1.0f, 4.0f);
-  need_regenerate |= ImGui::SliderFloat("Gain", &noise_params.gain, 0.1f, 1.0f);
-  need_regenerate |= ImGui::SliderInt("Seed", &noise_params.seed, 0, 10000);
-  need_regenerate |=
-      ImGui::SliderInt("Terrace Levels", &noise_params.terrace_levels, 3, 20);
-  need_regenerate |= ImGui::SliderInt("Min Region Size",
-                                      &noise_params.min_region_size, 50, 2000);
-  ImGui::Separator();
-  ImGui::Text("Contour Lines");
-  need_regenerate |=
-      ImGui::SliderFloat("Interval", &contour_interval, 0.05f, 0.2f);
-
-  ImGui::Separator();
-  ImGui::Text("Color Palette");
-  if (ImGui::BeginCombo("##palette", PALETTES[current_palette].name)) {
-    for (int i = 0; i < PALETTE_COUNT; ++i) {
-      bool is_selected = (current_palette == i);
-      if (ImGui::Selectable(PALETTES[i].name, is_selected)) {
-        current_palette = i;
-        need_regenerate = true;
-      }
-      if (is_selected)
-        ImGui::SetItemDefaultFocus();
-    }
-    ImGui::EndCombo();
-  }
-
-  ImGui::Separator();
-  need_regenerate |= ImGui::Checkbox("Isometric View", &use_isometric);
-  if (use_isometric) {
-    need_regenerate |=
-        ImGui::SliderFloat("Padding", &iso_padding, 0.0f, 200.0f);
-    need_regenerate |=
-        ImGui::SliderFloat("Offset X", &iso_offset_x_adjust, -200.0f, 200.0f);
-    need_regenerate |=
-        ImGui::SliderFloat("Offset Y", &iso_offset_y_adjust, -200.0f, 200.0f);
-  }
-  ImGui::Separator();
-  if (ImGui::Button("Regenerate", {175, 40}))
-    need_regenerate = true;
-  ImGui::SameLine();
-  if (ImGui::Button("Reset", {175, 40})) {
-    noise_params = DEFAULT_NOISE;
-    contour_interval = Config::DEFAULT_CONTOUR_INTERVAL;
-    use_isometric = DEFAULT_ISOMETRIC;
-    current_palette = 0;
-    need_regenerate = true;
-  }
-
-  ImGui::Separator();
-  ImGui::Text("Stats");
-  ImGui::Text("Lines: %zu", contour_lines.size());
-  ImGui::Text("Resolution: %dx%d", Config::MAP_WIDTH, Config::MAP_HEIGHT);
-
-  ImGui::End();
-  ImGui::Render();
-}
-
-void render_frame() {
-  SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(gpu_device);
-  if (!cmd)
-    return;
-
-  ImGui_ImplSDLGPU3_PrepareDrawData(ImGui::GetDrawData(), cmd);
-
-  SDL_GPUTexture *swapchain = nullptr;
-  if (!SDL_AcquireGPUSwapchainTexture(cmd, window, &swapchain, nullptr,
-                                      nullptr) ||
-      !swapchain) {
-    SDL_SubmitGPUCommandBuffer(cmd);
-    return;
-  }
-
-  SDL_GPUColorTargetInfo color_target = {};
-  color_target.texture = swapchain;
-  color_target.clear_color = {0.176f, 0.176f, 0.188f, 1.0f};
-  color_target.load_op = SDL_GPU_LOADOP_CLEAR;
-  color_target.store_op = SDL_GPU_STOREOP_STORE;
-
-  SDL_GPURenderPass *render_pass =
-      SDL_BeginGPURenderPass(cmd, &color_target, 1, nullptr);
-
-  ImGui_ImplSDLGPU3_RenderDrawData(ImGui::GetDrawData(), cmd, render_pass);
-
-  SDL_EndGPURenderPass(render_pass);
-  SDL_SubmitGPUCommandBuffer(cmd);
-}
-
-void cleanup() {
-  SDL_WaitForGPUIdle(gpu_device);
-  if (map_texture.texture) {
-    release_texture(gpu_device, map_texture);
-  }
-  ImGui_ImplSDLGPU3_Shutdown();
-  ImGui_ImplSDL3_Shutdown();
-  ImGui::DestroyContext();
-  if (gpu_device)
-    SDL_DestroyGPUDevice(gpu_device);
-  if (window)
-    SDL_DestroyWindow(window);
-  SDL_Quit();
-}
+#include "app_state.h"
+#include "gpu.h"
+#include "map_gen.h"
+#include "imgui_ui.h"
 
 int main() {
   SDL_Log("Application starting...");
 
-  if (!init())
+  GpuContext gpu = {};
+  if (!gpu_init(gpu))
     return 1;
+  ui_init(gpu.window, gpu.device);
+
+  AppState state = {};
+  state.heightmap.resize(Config::MAP_WIDTH * Config::MAP_HEIGHT);
 
   SDL_Log("Entering main loop");
   bool running = true;
   while (running) {
+    if (state.need_regenerate)
+      regenerate_map(state, gpu.device, gpu.map_texture);
 
-    if (need_regenerate)
-      regenerate_map();
-    process_input(running);
-    render_ui();
-    render_frame();
+    SDL_Event event;
+    while (SDL_PollEvent(&event)) {
+      ui_process_event(event);
+      if (event.type == SDL_EVENT_QUIT)
+        running = false;
+    }
+
+    ui_render(state, gpu.map_texture);
+
+    FrameContext frame;
+    if (gpu_acquire_frame(gpu, frame)) {
+      ui_prepare_draw(frame.cmd);
+      gpu_begin_render_pass(gpu, frame);
+      ui_draw(frame.cmd, frame.render_pass);
+      gpu_end_frame(frame);
+    }
   }
 
-  cleanup();
+  ui_shutdown();
+  gpu_cleanup(gpu);
   return 0;
 }

@@ -45,7 +45,7 @@ inline uint32_t get_elevation_color_smooth(float h, const Palette &p) {
 
 inline uint32_t add_noise_variation(uint32_t color, int x, int y,
                                     float strength = 0.08f) {
-  uint32_t hash = x * 374761393 + y * 668265263;
+  uint32_t hash = (uint32_t)x * 374761393u + (uint32_t)y * 668265263u;
   hash = (hash ^ (hash >> 13)) * 1274126177;
   float noise = ((hash & 0xFFFF) / 65535.0f - 0.5f) * strength;
 
