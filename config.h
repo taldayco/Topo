@@ -2,6 +2,9 @@
 #include <stdint.h>
 
 struct Config {
+  // Toggle ImGui UI (false = plain SDL window with just the map)
+  static constexpr bool use_IMGUI = false;
+
   // Map dimensions (base heightmap resolution for quality)
   static inline int MAP_WIDTH = 1024;
   static inline int MAP_HEIGHT = 1024;
@@ -15,7 +18,7 @@ struct Config {
   static constexpr float WINDOW_WIDTH_PERCENT = 0.85f;  // 85% of display width
   static constexpr float WINDOW_HEIGHT_PERCENT = 0.85f; // 85% of display height
   static constexpr float UI_PANEL_WIDTH_PERCENT = 0.25f; // 25% of window width
-  static constexpr int UI_PANEL_MIN_WIDTH = 400;        // Minimum width for controls
+  static constexpr int UI_PANEL_MIN_WIDTH = 400; // Minimum width for controls
 
   // Map scale (controls zoom level independent of resolution)
   static constexpr float DEFAULT_MAP_SCALE = 1.0f;

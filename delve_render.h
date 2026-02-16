@@ -14,6 +14,7 @@ struct PixelBuffer {
 };
 
 PixelBuffer generate_map_pixels(std::span<const float> heightmap,
+                                std::span<const int> band_map,
                                 std::span<const Line> contour_lines, int width,
                                 int height, bool use_isometric,
                                 const Palette &palette,

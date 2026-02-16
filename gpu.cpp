@@ -22,14 +22,19 @@ bool gpu_init(GpuContext &ctx) {
         (int)(display_height * Config::WINDOW_HEIGHT_PERCENT);
 
     int map_area_width = Config::WINDOW_HEIGHT;
-    Config::UI_PANEL_WIDTH =
-        (int)(Config::WINDOW_WIDTH * Config::UI_PANEL_WIDTH_PERCENT);
 
-    if (Config::UI_PANEL_WIDTH < Config::UI_PANEL_MIN_WIDTH) {
-      Config::UI_PANEL_WIDTH = Config::UI_PANEL_MIN_WIDTH;
+    if constexpr (Config::use_IMGUI) {
+      Config::UI_PANEL_WIDTH =
+          (int)(Config::WINDOW_WIDTH * Config::UI_PANEL_WIDTH_PERCENT);
+
+      if (Config::UI_PANEL_WIDTH < Config::UI_PANEL_MIN_WIDTH) {
+        Config::UI_PANEL_WIDTH = Config::UI_PANEL_MIN_WIDTH;
+      }
+
+      Config::WINDOW_WIDTH = map_area_width + Config::UI_PANEL_WIDTH + 50;
+    } else {
+      Config::WINDOW_WIDTH = Config::WINDOW_HEIGHT;
     }
-
-    Config::WINDOW_WIDTH = map_area_width + Config::UI_PANEL_WIDTH + 50;
 
     SDL_Log("Display: %dx%d", display_width, display_height);
     SDL_Log("Window: %dx%d, Panel: %d", Config::WINDOW_WIDTH,
@@ -80,7 +85,8 @@ bool gpu_acquire_frame(GpuContext &ctx, FrameContext &frame) {
     return false;
 
   if (!SDL_AcquireGPUSwapchainTexture(frame.cmd, ctx.window,
-                                      &frame.swapchain, nullptr, nullptr) ||
+                                      &frame.swapchain, &frame.swapchain_w,
+                                      &frame.swapchain_h) ||
       !frame.swapchain) {
     SDL_SubmitGPUCommandBuffer(frame.cmd);
     return false;
@@ -103,8 +109,45 @@ bool gpu_begin_render_pass(GpuContext &ctx, FrameContext &frame) {
 }
 
 void gpu_end_frame(FrameContext &frame) {
-  SDL_EndGPURenderPass(frame.render_pass);
+  if (frame.render_pass)
+    SDL_EndGPURenderPass(frame.render_pass);
   SDL_SubmitGPUCommandBuffer(frame.cmd);
+}
+
+void gpu_blit_texture(FrameContext &frame, const TextureHandle &tex) {
+  // Compute aspect-ratio-preserving destination region (letterboxed)
+  float src_aspect = (float)tex.width / (float)tex.height;
+  float dst_aspect = (float)frame.swapchain_w / (float)frame.swapchain_h;
+
+  uint32_t dst_w, dst_h, dst_x, dst_y;
+  if (src_aspect > dst_aspect) {
+    // Source wider: fit to width, letterbox top/bottom
+    dst_w = frame.swapchain_w;
+    dst_h = (uint32_t)(frame.swapchain_w / src_aspect);
+    dst_x = 0;
+    dst_y = (frame.swapchain_h - dst_h) / 2;
+  } else {
+    // Source taller: fit to height, pillarbox left/right
+    dst_h = frame.swapchain_h;
+    dst_w = (uint32_t)(frame.swapchain_h * src_aspect);
+    dst_x = (frame.swapchain_w - dst_w) / 2;
+    dst_y = 0;
+  }
+
+  SDL_GPUBlitInfo blit = {};
+  blit.source.texture = tex.texture;
+  blit.source.w = tex.width;
+  blit.source.h = tex.height;
+  blit.destination.texture = frame.swapchain;
+  blit.destination.x = dst_x;
+  blit.destination.y = dst_y;
+  blit.destination.w = dst_w;
+  blit.destination.h = dst_h;
+  blit.load_op = SDL_GPU_LOADOP_CLEAR;
+  blit.clear_color = {0.176f, 0.176f, 0.188f, 1.0f};
+  blit.filter = SDL_GPU_FILTER_LINEAR;
+
+  SDL_BlitGPUTexture(frame.cmd, &blit);
 }
 
 void gpu_cleanup(GpuContext &ctx) {

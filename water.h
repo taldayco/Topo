@@ -1,8 +1,7 @@
 // water.h  (additions are minimal and self-contained)
 #pragma once
 #include "basalt.h"
-#include "plateau.h"
-#include "types.h"
+#include "contour.h"
 #include <cstdint>
 #include <span>
 #include <unordered_set>

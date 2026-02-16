@@ -58,6 +58,7 @@ static void draw_line_soft(std::vector<uint32_t> &pixels, int width, int height,
 }
 
 PixelBuffer generate_map_pixels(std::span<const float> heightmap,
+                                std::span<const int> band_map,
                                 std::span<const Line> contour_lines, int width,
                                 int height, bool use_isometric,
                                 const Palette &palette,
@@ -75,7 +76,7 @@ PixelBuffer generate_map_pixels(std::span<const float> heightmap,
     params.height_scale = Config::ISO_HEIGHT_SCALE;
 
     IsometricView iso_view = create_isometric_heightmap(
-        heightmap, contour_lines, width, height, params, palette,
+        heightmap, band_map, contour_lines, width, height, params, palette,
         contour_opacity, iso_padding, iso_offset_x_adjust, iso_offset_y_adjust);
     buf.pixels = std::move(iso_view.pixels);
     buf.width = iso_view.width;

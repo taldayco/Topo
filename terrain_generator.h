@@ -1,8 +1,7 @@
 #pragma once
+#include "contour.h"
 #include <span>
 #include <vector>
-
-struct Plateau;
 struct HexColumn;
 struct WaterBody;
 
@@ -15,6 +14,7 @@ public:
     std::vector<int> plateaus_with_columns;
   };
 
-  static TerrainData generate(std::span<const float> heightmap, int width,
+  static TerrainData generate(std::span<const float> heightmap,
+                              std::span<const int> band_map, int width,
                               int height);
 };

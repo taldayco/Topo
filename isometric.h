@@ -23,7 +23,8 @@ void world_to_iso(float x, float y, float z, float &out_x, float &out_y,
                   const IsometricParams &params);
 
 IsometricView create_isometric_heightmap(
-    std::span<const float> heightmap, std::span<const Line> contour_lines,
-    int map_width, int map_height, const IsometricParams &params,
-    const Palette &palette, float contour_opacity, float padding,
-    float offset_x_adjust, float offset_y_adjust);
+    std::span<const float> heightmap, std::span<const int> band_map,
+    std::span<const Line> contour_lines, int map_width, int map_height,
+    const IsometricParams &params, const Palette &palette,
+    float contour_opacity, float padding, float offset_x_adjust,
+    float offset_y_adjust);

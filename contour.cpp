@@ -1,8 +1,17 @@
 #include "contour.h"
+#include <SDL3/SDL.h>
+#include <queue>
 
 void extract_contours(std::span<const float> heightmap, int width, int height,
-                      float interval, std::vector<Line> &out_lines) {
+                      float interval, std::vector<Line> &out_lines,
+                      std::vector<int> &out_band_map) {
   out_lines.clear();
+
+  int total = width * height;
+  out_band_map.resize(total);
+  for (int i = 0; i < total; ++i) {
+    out_band_map[i] = (int)(heightmap[i] / interval);
+  }
 
   for (float level = interval * 0.5f; level < 1.0f; level += interval) {
     for (int y = 0; y < height - 1; ++y) {
@@ -70,4 +79,70 @@ void extract_contours(std::span<const float> heightmap, int width, int height,
       }
     }
   }
+}
+
+std::vector<Plateau> detect_plateaus(std::span<const int> band_map,
+                                     std::span<const float> heightmap,
+                                     int width, int height) {
+
+  std::vector<bool> visited(width * height, false);
+  std::vector<Plateau> plateaus;
+
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      int idx = y * width + x;
+      if (visited[idx])
+        continue;
+
+      int band = band_map[idx];
+      Plateau plateau;
+
+      std::queue<int> queue;
+      queue.push(idx);
+      visited[idx] = true;
+
+      float sum_x = 0, sum_y = 0;
+      float sum_height = 0;
+      int count = 0;
+
+      while (!queue.empty()) {
+        int current = queue.front();
+        queue.pop();
+
+        plateau.pixels.push_back(current);
+
+        int cx = current % width;
+        int cy = current / width;
+        sum_x += cx;
+        sum_y += cy;
+        sum_height += heightmap[current];
+        count++;
+
+        int neighbors[4][2] = {{0, -1}, {-1, 0}, {1, 0}, {0, 1}};
+        for (auto [dx, dy] : neighbors) {
+          int nx = cx + dx;
+          int ny = cy + dy;
+
+          if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+            int nidx = ny * width + nx;
+            if (!visited[nidx] && band_map[nidx] == band) {
+              visited[nidx] = true;
+              queue.push(nidx);
+            }
+          }
+        }
+      }
+
+      plateau.height = sum_height / count;
+      plateau.center_x = sum_x / count;
+      plateau.center_y = sum_y / count;
+
+      if (count > 50) {
+        plateaus.push_back(plateau);
+      }
+    }
+  }
+
+  SDL_Log("Detected %zu plateaus", plateaus.size());
+  return plateaus;
 }

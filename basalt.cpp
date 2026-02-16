@@ -1,6 +1,5 @@
 #include "basalt.h"
 #include "palettes.h"
-#include "plateau.h"
 #include "types.h"
 #include "util.h"
 #include <SDL3/SDL.h>
@@ -131,9 +130,8 @@ static void compute_visible_edges(std::vector<HexColumn> &columns) {
 std::vector<HexColumn>
 generate_basalt_columns(std::span<const float> heightmap, int width, int height,
                         float hex_size,
+                        const std::vector<Plateau> &plateaus,
                         std::vector<int> &plateaus_with_columns_out) {
-
-  std::vector<Plateau> plateaus = detect_plateaus(heightmap, width, height);
   std::vector<HexColumn> columns;
 
   SDL_Log("Starting column generation with hex_size=%.2f", hex_size);

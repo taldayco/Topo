@@ -1,4 +1,5 @@
 #include "app_state.h"
+#include "config.h"
 #include "gpu.h"
 #include "map_gen.h"
 #include "imgui_ui.h"
@@ -9,7 +10,9 @@ int main() {
   GpuContext gpu = {};
   if (!gpu_init(gpu))
     return 1;
-  ui_init(gpu.window, gpu.device);
+
+  if constexpr (Config::use_IMGUI)
+    ui_init(gpu.window, gpu.device);
 
   AppState state = {};
   state.heightmap.resize(Config::MAP_WIDTH * Config::MAP_HEIGHT);
@@ -22,23 +25,34 @@ int main() {
 
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
-      ui_process_event(event);
+      if constexpr (Config::use_IMGUI)
+        ui_process_event(event);
       if (event.type == SDL_EVENT_QUIT)
         running = false;
     }
 
-    ui_render(state, gpu.map_texture);
+    if constexpr (Config::use_IMGUI) {
+      ui_render(state, gpu.map_texture);
 
-    FrameContext frame;
-    if (gpu_acquire_frame(gpu, frame)) {
-      ui_prepare_draw(frame.cmd);
-      gpu_begin_render_pass(gpu, frame);
-      ui_draw(frame.cmd, frame.render_pass);
-      gpu_end_frame(frame);
+      FrameContext frame;
+      if (gpu_acquire_frame(gpu, frame)) {
+        ui_prepare_draw(frame.cmd);
+        gpu_begin_render_pass(gpu, frame);
+        ui_draw(frame.cmd, frame.render_pass);
+        gpu_end_frame(frame);
+      }
+    } else {
+      FrameContext frame;
+      if (gpu_acquire_frame(gpu, frame)) {
+        if (gpu.map_texture.texture)
+          gpu_blit_texture(frame, gpu.map_texture);
+        gpu_end_frame(frame);
+      }
     }
   }
 
-  ui_shutdown();
+  if constexpr (Config::use_IMGUI)
+    ui_shutdown();
   gpu_cleanup(gpu);
   return 0;
 }

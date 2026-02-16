@@ -1,7 +1,6 @@
 #include "water.h"
 #include "basalt.h"
 #include "config.h"
-#include "plateau.h"
 #include "util.h"
 #include <SDL3/SDL.h>
 #include <algorithm>

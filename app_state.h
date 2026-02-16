@@ -11,6 +11,11 @@ constexpr NoiseParams DEFAULT_NOISE = {
     Config::DEFAULT_NOISE_SEED,       Config::DEFAULT_NOISE_LEVELS};
 constexpr bool DEFAULT_ISOMETRIC = true;
 
+struct ViewState {
+    float zoom = 1.0f;
+    float pan_x = 0.5f, pan_y = 0.5f;
+};
+
 struct AppState {
   NoiseParams noise_params = DEFAULT_NOISE;
   float contour_interval = Config::DEFAULT_CONTOUR_INTERVAL;
@@ -22,7 +27,9 @@ struct AppState {
   float iso_offset_y_adjust = 0.0f;
   float contour_opacity = Config::DEFAULT_CONTOUR_OPACITY;
   DetailParams detail_params = {};
+  ViewState view;
   bool need_regenerate = true;
   std::vector<float> heightmap;
+  std::vector<int> band_map;
   std::vector<Line> contour_lines;
 };

@@ -1,7 +1,6 @@
 #include "isometric.h"
 #include "basalt.h"
 #include "config.h"
-#include "plateau.h"
 #include "terrain_generator.h"
 #include "water.h"
 #include <SDL3/SDL.h>
@@ -46,12 +45,14 @@ static void draw_line_iso(std::vector<uint32_t> &pixels, int width, int height,
 }
 
 IsometricView create_isometric_heightmap(
-    std::span<const float> heightmap, std::span<const Line> contour_lines,
-    int map_width, int map_height, const IsometricParams &params,
-    const Palette &palette, float contour_opacity, float padding,
-    float offset_x_adjust, float offset_y_adjust) {
+    std::span<const float> heightmap, std::span<const int> band_map,
+    std::span<const Line> contour_lines, int map_width, int map_height,
+    const IsometricParams &params, const Palette &palette,
+    float contour_opacity, float padding, float offset_x_adjust,
+    float offset_y_adjust) {
 
-  auto terrain = TerrainGenerator::generate(heightmap, map_width, map_height);
+  auto terrain =
+      TerrainGenerator::generate(heightmap, band_map, map_width, map_height);
 
   if (terrain.columns.empty()) {
     SDL_Log("Warning: No columns generated, creating fallback view");

@@ -1,20 +1,21 @@
 #include "terrain_generator.h"
 #include "basalt.h"
 #include "config.h"
-#include "plateau.h"
 #include "water.h"
 #include <SDL3/SDL.h>
 
 TerrainGenerator::TerrainData
-TerrainGenerator::generate(std::span<const float> heightmap, int width,
+TerrainGenerator::generate(std::span<const float> heightmap,
+                           std::span<const int> band_map, int width,
                            int height) {
 
   TerrainData data;
 
-  data.plateaus = detect_plateaus(heightmap, width, height);
+  data.plateaus = detect_plateaus(band_map, heightmap, width, height);
   SDL_Log("TerrainGenerator: Found %zu plateaus", data.plateaus.size());
-  data.columns = generate_basalt_columns(
-      heightmap, width, height, Config::HEX_SIZE, data.plateaus_with_columns);
+  data.columns = generate_basalt_columns(heightmap, width, height,
+                                          Config::HEX_SIZE, data.plateaus,
+                                          data.plateaus_with_columns);
   SDL_Log("TerrainGenerator: Generated %zu columns on %zu plateaus",
           data.columns.size(), data.plateaus_with_columns.size());
 

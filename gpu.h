@@ -19,12 +19,15 @@ struct FrameContext {
   SDL_GPUCommandBuffer *cmd = nullptr;
   SDL_GPUTexture *swapchain = nullptr;
   SDL_GPURenderPass *render_pass = nullptr;
+  uint32_t swapchain_w = 0;
+  uint32_t swapchain_h = 0;
 };
 
 bool gpu_init(GpuContext &ctx);
 bool gpu_acquire_frame(GpuContext &ctx, FrameContext &frame);
 bool gpu_begin_render_pass(GpuContext &ctx, FrameContext &frame);
 void gpu_end_frame(FrameContext &frame);
+void gpu_blit_texture(FrameContext &frame, const TextureHandle &tex);
 void gpu_cleanup(GpuContext &ctx);
 
 void release_texture(SDL_GPUDevice *device, const TextureHandle &handle);

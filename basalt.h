@@ -1,6 +1,6 @@
 #pragma once
 #include "isometric.h"
-#include "plateau.h"
+#include "contour.h"
 #include "types.h"
 #include <vector>
 
@@ -15,6 +15,7 @@ struct HexColumn {
 std::vector<HexColumn>
 generate_basalt_columns(std::span<const float> heightmap, int width, int height,
                         float hex_size,
+                        const std::vector<Plateau> &plateaus,
                         std::vector<int> &plateaus_with_columns_out);
 void get_hex_corners(int q, int r, float hex_size, Vec2 corners[6]);
 void render_basalt_columns(std::vector<uint32_t> &pixels, int view_width,

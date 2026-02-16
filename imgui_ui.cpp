@@ -1,8 +1,22 @@
 #include "imgui_ui.h"
 #include "palettes.h"
+#include <algorithm>
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_sdlgpu3.h>
+
+static void clamp_pan(ViewState &v) {
+    float half = 0.5f / v.zoom;
+    v.pan_x = std::clamp(v.pan_x, half, 1.0f - half);
+    v.pan_y = std::clamp(v.pan_y, half, 1.0f - half);
+}
+
+static void compute_uvs(ViewState &v, ImVec2 &uv0, ImVec2 &uv1) {
+    clamp_pan(v);
+    float half = 0.5f / v.zoom;
+    uv0 = {v.pan_x - half, v.pan_y - half};
+    uv1 = {v.pan_x + half, v.pan_y + half};
+}
 
 void ui_init(SDL_Window *window, SDL_GPUDevice *device) {
   IMGUI_CHECKVERSION();
@@ -68,7 +82,28 @@ void ui_render(AppState &state, const TextureHandle &map_texture) {
     float offset_y = (window_h - display_h) * 0.5f;
 
     ImGui::SetCursorPos({offset_x, offset_y});
-    ImGui::Image((ImTextureID)map_texture.texture, {display_w, display_h});
+    ImVec2 uv0, uv1;
+    compute_uvs(state.view, uv0, uv1);
+    ImGui::Image((ImTextureID)map_texture.texture, {display_w, display_h}, uv0, uv1);
+
+    // Keyboard zoom (toward view center)
+    float zoom_input = 0.0f;
+    if (ImGui::IsKeyPressed(ImGuiKey_Equal))  zoom_input =  1.0f;  // + key
+    if (ImGui::IsKeyPressed(ImGuiKey_Minus))  zoom_input = -1.0f;  // - key
+    if (zoom_input != 0.0f) {
+      state.view.zoom *= 1.0f + zoom_input * 0.12f;
+      state.view.zoom = std::clamp(state.view.zoom, 1.0f, 16.0f);
+      clamp_pan(state.view);
+    }
+
+    // Mouse drag pan
+    if (ImGui::IsItemHovered() && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+      ImVec2 delta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left);
+      ImGui::ResetMouseDragDelta(ImGuiMouseButton_Left);
+      state.view.pan_x -= delta.x / display_w / state.view.zoom;
+      state.view.pan_y -= delta.y / display_h / state.view.zoom;
+      clamp_pan(state.view);
+    }
   } else {
     ImGui::Text("Generating...");
   }
@@ -133,7 +168,7 @@ void ui_render(AppState &state, const TextureHandle &map_texture) {
   ImGui::Separator();
   ImGui::Text("Map Scale");
   state.need_regenerate |=
-      ImGui::SliderFloat("Zoom", &state.map_scale, 0.25f, 4.0f);
+      ImGui::SliderFloat("Map Scale", &state.map_scale, 0.25f, 4.0f);
   if (ImGui::IsItemHovered()) {
     ImGui::SetTooltip("Controls zoom level: higher = more terrain visible");
   }
@@ -148,13 +183,18 @@ void ui_render(AppState &state, const TextureHandle &map_texture) {
     state.use_isometric = DEFAULT_ISOMETRIC;
     state.current_palette = 0;
     state.map_scale = Config::DEFAULT_MAP_SCALE;
+    state.view = ViewState{};
     state.need_regenerate = true;
+  }
+  if (ImGui::Button("Reset View", {175, 40})) {
+    state.view = ViewState{};
   }
 
   ImGui::Separator();
   ImGui::Text("Stats");
   ImGui::Text("Lines: %zu", state.contour_lines.size());
   ImGui::Text("Resolution: %dx%d", Config::MAP_WIDTH, Config::MAP_HEIGHT);
+  ImGui::Text("View Zoom: %.1fx", state.view.zoom);
 
   ImGui::End();
   ImGui::Render();
