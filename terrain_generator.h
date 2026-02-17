@@ -12,10 +12,13 @@ constexpr int16_t TERRAIN_BASALT = -1;
 constexpr int16_t TERRAIN_WATER  = -2;
 // Positive values (1..N) = plateau index + 1
 
+enum class RegionType { Marble, Void };
+
 struct UnusedRegion {
     std::vector<int> pixels;
     float avg_elevation;
     float min_x, max_x, min_y, max_y;
+    RegionType type = RegionType::Void;
 };
 
 class TerrainGenerator {

@@ -98,12 +98,17 @@ IsometricView create_isometric_heightmap(
   if (Config::enable_debug_overlay) {
     constexpr float ALPHA = 0.35f;
     for (size_t ri = 0; ri < terrain.unused_regions.size(); ++ri) {
-      uint32_t h = hash1d((int)ri);
-      uint8_t cr = 80 + (h & 0x7F);
-      uint8_t cg = 80 + ((h >> 8) & 0x7F);
-      uint8_t cb = 80 + ((h >> 16) & 0x7F);
+      const auto &region = terrain.unused_regions[ri];
+      uint8_t cr, cg, cb;
+      if (region.type == RegionType::Marble) {
+        // Dark purple
+        cr = 80; cg = 0; cb = 120;
+      } else {
+        // Green
+        cr = 0; cg = 140; cb = 0;
+      }
 
-      for (int idx : terrain.unused_regions[ri].pixels) {
+      for (int idx : region.pixels) {
         int wx = idx % map_width;
         int wy = idx / map_width;
         float z = heightmap[idx];

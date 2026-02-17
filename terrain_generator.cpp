@@ -3,6 +3,7 @@
 #include "config.h"
 #include "water.h"
 #include <SDL3/SDL.h>
+#include <algorithm>
 #include <queue>
 
 static std::vector<UnusedRegion>
@@ -112,6 +113,21 @@ TerrainGenerator::generate(std::span<const float> heightmap,
                                                width, height);
   SDL_Log("TerrainGenerator: Found %zu unused regions (>= 50 pixels)",
           data.unused_regions.size());
+
+  // Classify: largest 3 regions are Marble, rest are Void
+  if (!data.unused_regions.empty()) {
+    std::vector<size_t> indices(data.unused_regions.size());
+    for (size_t i = 0; i < indices.size(); ++i) indices[i] = i;
+    std::partial_sort(indices.begin(),
+                      indices.begin() + std::min<size_t>(3, indices.size()),
+                      indices.end(),
+                      [&](size_t a, size_t b) {
+                        return data.unused_regions[a].pixels.size() >
+                               data.unused_regions[b].pixels.size();
+                      });
+    for (size_t i = 0; i < std::min<size_t>(3, indices.size()); ++i)
+      data.unused_regions[indices[i]].type = RegionType::Marble;
+  }
 
   return data;
 }

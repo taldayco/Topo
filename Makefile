@@ -502,6 +502,30 @@ map_gen.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/map_gen.cpp.s
 .PHONY : map_gen.cpp.s
 
+marble.o: marble.cpp.o
+.PHONY : marble.o
+
+# target to build an object file
+marble.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/marble.cpp.o
+.PHONY : marble.cpp.o
+
+marble.i: marble.cpp.i
+.PHONY : marble.i
+
+# target to preprocess a source file
+marble.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/marble.cpp.i
+.PHONY : marble.cpp.i
+
+marble.s: marble.cpp.s
+.PHONY : marble.s
+
+# target to generate assembly for a file
+marble.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/marble.cpp.s
+.PHONY : marble.cpp.s
+
 noise.o: noise.cpp.o
 .PHONY : noise.o
 
@@ -525,30 +549,6 @@ noise.s: noise.cpp.s
 noise.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/noise.cpp.s
 .PHONY : noise.cpp.s
-
-plateau.o: plateau.cpp.o
-.PHONY : plateau.o
-
-# target to build an object file
-plateau.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/plateau.cpp.o
-.PHONY : plateau.cpp.o
-
-plateau.i: plateau.cpp.i
-.PHONY : plateau.i
-
-# target to preprocess a source file
-plateau.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/plateau.cpp.i
-.PHONY : plateau.cpp.i
-
-plateau.s: plateau.cpp.s
-.PHONY : plateau.s
-
-# target to generate assembly for a file
-plateau.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/plateau.cpp.s
-.PHONY : plateau.cpp.s
 
 terrain_generator.o: terrain_generator.cpp.o
 .PHONY : terrain_generator.o
@@ -653,12 +653,12 @@ help:
 	@echo "... map_gen.o"
 	@echo "... map_gen.i"
 	@echo "... map_gen.s"
+	@echo "... marble.o"
+	@echo "... marble.i"
+	@echo "... marble.s"
 	@echo "... noise.o"
 	@echo "... noise.i"
 	@echo "... noise.s"
-	@echo "... plateau.o"
-	@echo "... plateau.i"
-	@echo "... plateau.s"
 	@echo "... terrain_generator.o"
 	@echo "... terrain_generator.i"
 	@echo "... terrain_generator.s"
