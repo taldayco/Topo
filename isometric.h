@@ -1,6 +1,7 @@
 #pragma once
 #include "contour.h"
 #include "palettes.h"
+#include "types.h"
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -13,16 +14,13 @@ struct IsometricParams {
   float height_scale = 0.3f;
 };
 
-struct IsometricView {
-  int width;
-  int height;
-  std::vector<uint32_t> pixels;
-};
-
 void world_to_iso(float x, float y, float z, float &out_x, float &out_y,
                   const IsometricParams &params);
 
-IsometricView create_isometric_heightmap(
+void iso_to_world(float iso_x, float iso_y, float &out_x, float &out_y,
+                  const IsometricParams &params);
+
+PixelBuffer create_isometric_heightmap(
     std::span<const float> heightmap, std::span<const int> band_map,
     std::span<const Line> contour_lines, int map_width, int map_height,
     const IsometricParams &params, const Palette &palette,

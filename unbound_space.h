@@ -1,6 +1,5 @@
 #pragma once
-#include "basalt.h"
-#include "isometric.h"
+#include "hex.h"
 #include "terrain_generator.h"
 #include <cstdint>
 #include <vector>
@@ -16,8 +15,3 @@ void render_unbound_space_columns(std::vector<uint32_t> &pixels, int view_width,
                            float hex_size, float offset_x, float offset_y,
                            const IsometricParams &params,
                            const Palette &palette);
-
-void render_unbound_space_debug_overlay(std::vector<uint32_t> &pixels, int view_width,
-    int view_height, const std::vector<UnusedRegion> &regions,
-    std::span<const float> heightmap, int map_width,
-    float offset_x, float offset_y, const IsometricParams &params);

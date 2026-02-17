@@ -1,5 +1,6 @@
 #include "lava.h"
 #include "basalt.h"
+#include "color.h"
 #include "config.h"
 #include "terrain_generator.h"
 #include "util.h"
@@ -661,11 +662,7 @@ void render_lava(std::vector<uint32_t> &pixels, int view_w, int view_h,
       // Calculate color once
       float depth_factor =
           std::clamp(0.9f + (z - lava.height) * 2.0f, 0.8f, 1.1f);
-      uint8_t r =
-          (uint8_t)(((Config::LAVA_COLOR >> 16) & 0xFF) * depth_factor);
-      uint8_t g = (uint8_t)(((Config::LAVA_COLOR >> 8) & 0xFF) * depth_factor);
-      uint8_t b = (uint8_t)((Config::LAVA_COLOR & 0xFF) * depth_factor);
-      uint32_t color = 0xFF000000 | (r << 16) | (g << 8) | b;
+      uint32_t color = modulate_color(Config::LAVA_COLOR, depth_factor);
 
       // Draw with circular kernel (radius 2) for coverage - ~13 pixels instead
       // of 121

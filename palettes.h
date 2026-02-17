@@ -1,5 +1,6 @@
 // palettes.h
 #pragma once
+#include "color.h"
 #include <algorithm>
 #include <cstdint>
 
@@ -13,17 +14,6 @@ static const Palette PALETTES[] = {
      {0xFF3A3A3A, 0xFF3A3A3A, 0xFF6A6A6A, 0xFF9A9A9A, 0xFFCACACA, 0xFF000000}}};
 
 static constexpr int PALETTE_COUNT = sizeof(PALETTES) / sizeof(Palette);
-
-inline uint32_t lerp_color(uint32_t c1, uint32_t c2, float t) {
-  uint8_t r1 = (c1 >> 16) & 0xFF, g1 = (c1 >> 8) & 0xFF, b1 = c1 & 0xFF;
-  uint8_t r2 = (c2 >> 16) & 0xFF, g2 = (c2 >> 8) & 0xFF, b2 = c2 & 0xFF;
-
-  uint8_t r = r1 + (r2 - r1) * t;
-  uint8_t g = g1 + (g2 - g1) * t;
-  uint8_t b = b1 + (b2 - b1) * t;
-
-  return 0xFF000000 | (r << 16) | (g << 8) | b;
-}
 
 inline uint32_t get_elevation_color_smooth(float h, const Palette &p) {
   h = std::clamp(h, 0.0f, 1.0f);
@@ -41,19 +31,6 @@ inline uint32_t get_elevation_color_smooth(float h, const Palette &p) {
     float t = (h - 0.75f) / 0.25f;
     return lerp_color(p.colors[3], p.colors[4], t);
   }
-}
-
-inline uint32_t add_noise_variation(uint32_t color, int x, int y,
-                                    float strength = 0.08f) {
-  uint32_t hash = (uint32_t)x * 374761393u + (uint32_t)y * 668265263u;
-  hash = (hash ^ (hash >> 13)) * 1274126177;
-  float noise = ((hash & 0xFFFF) / 65535.0f - 0.5f) * strength;
-
-  int r = std::clamp((int)((color >> 16 & 0xFF) * (1.0f + noise)), 0, 255);
-  int g = std::clamp((int)((color >> 8 & 0xFF) * (1.0f + noise)), 0, 255);
-  int b = std::clamp((int)((color & 0xFF) * (1.0f + noise)), 0, 255);
-
-  return 0xFF000000 | (r << 16) | (g << 8) | b;
 }
 
 inline uint32_t organic_color(float h, int x, int y, const Palette &p) {

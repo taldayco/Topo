@@ -1,9 +1,10 @@
 #include "isometric.h"
 #include "basalt.h"
+#include "color.h"
 #include "config.h"
+#include "hex.h"
 #include "unbound_space.h"
 #include "terrain_generator.h"
-#include "crystal.h"
 #include "lava.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -13,6 +14,18 @@ void world_to_iso(float x, float y, float z, float &out_x, float &out_y,
                   const IsometricParams &params) {
   out_x = (x - y) * params.tile_width;
   out_y = (x + y) * params.tile_height - z * params.height_scale;
+}
+
+void iso_to_world(float iso_x, float iso_y, float &out_x, float &out_y,
+                  const IsometricParams &params) {
+  // Inverse of world_to_iso assuming z=0 (ground plane picking):
+  //   iso_x = (x - y) * tw
+  //   iso_y = (x + y) * th
+  // Solving for x, y:
+  float tw = params.tile_width;
+  float th = params.tile_height;
+  out_x = (iso_x / tw + iso_y / th) * 0.5f;
+  out_y = (iso_y / th - iso_x / tw) * 0.5f;
 }
 
 static void draw_line_iso(std::vector<uint32_t> &pixels, int width, int height,
@@ -33,20 +46,14 @@ static void draw_line_iso(std::vector<uint32_t> &pixels, int width, int height,
     int x = (int)(x0 + step_x * i);
     int y = (int)(y0 + step_y * i);
     if (x >= 0 && x < width && y >= 0 && y < height) {
-      uint32_t dst = pixels[y * width + x];
-      uint8_t dst_r = (dst >> 16) & 0xFF;
-      uint8_t dst_g = (dst >> 8) & 0xFF;
-      uint8_t dst_b = dst & 0xFF;
-      float blend = alpha / 255.0f;
-      uint8_t out_r = r * blend + dst_r * (1.0f - blend);
-      uint8_t out_g = g * blend + dst_g * (1.0f - blend);
-      uint8_t out_b = b * blend + dst_b * (1.0f - blend);
-      pixels[y * width + x] = 0xFF000000 | (out_r << 16) | (out_g << 8) | out_b;
+      uint32_t src = 0xFF000000 | (r << 16) | (g << 8) | b;
+      pixels[y * width + x] =
+          alpha_blend(src, pixels[y * width + x], alpha / 255.0f);
     }
   }
 }
 
-IsometricView create_isometric_heightmap(
+PixelBuffer create_isometric_heightmap(
     std::span<const float> heightmap, std::span<const int> band_map,
     std::span<const Line> contour_lines, int map_width, int map_height,
     const IsometricParams &params, const Palette &palette,
@@ -58,7 +65,7 @@ IsometricView create_isometric_heightmap(
 
   if (terrain.columns.empty()) {
     SDL_Log("Warning: No columns generated, creating fallback view");
-    IsometricView view;
+    PixelBuffer view;
     view.width = map_width * 4;
     view.height = map_height * 4;
     view.pixels.resize(view.width * view.height, Config::BACKGROUND_COLOR);
@@ -86,7 +93,7 @@ IsometricView create_isometric_heightmap(
   int view_width = (int)(max_x - min_x) + (int)(padding * 2);
   int view_height = (int)(max_y - min_y) + (int)(padding * 2);
 
-  IsometricView view;
+  PixelBuffer view;
   view.width = view_width;
   view.height = view_height;
   view.pixels.resize(view_width * view_height, Config::BACKGROUND_COLOR);
@@ -95,12 +102,14 @@ IsometricView create_isometric_heightmap(
   float offset_y = -min_y + padding + offset_y_adjust;
 
   if (Config::enable_debug_overlay) {
-    render_unbound_space_debug_overlay(view.pixels, view_width, view_height,
+    render_region_debug_overlay(view.pixels, view_width, view_height,
         terrain.unused_regions, heightmap, map_width,
-        offset_x, offset_y, params);
-    render_crystal_debug_overlay(view.pixels, view_width, view_height,
+        offset_x, offset_y, params,
+        RegionType::UnboundSpace, 14, 14, 14);
+    render_region_debug_overlay(view.pixels, view_width, view_height,
         terrain.unused_regions, heightmap, map_width,
-        offset_x, offset_y, params);
+        offset_x, offset_y, params,
+        RegionType::Crystal, 0, 140, 0);
   }
 
   render_basalt_columns(view.pixels, view_width, view_height, terrain.columns,

@@ -13,8 +13,23 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
+# Dependencies
 find_package(SDL3 REQUIRED)
 
+include(FetchContent)
+
+FetchContent_Declare(EnTT
+    GIT_REPOSITORY https://github.com/skypjack/entt
+    GIT_TAG v3.14.0
+)
+FetchContent_Declare(json
+    GIT_REPOSITORY https://github.com/nlohmann/json
+    GIT_TAG v3.11.3
+)
+
+FetchContent_MakeAvailable(EnTT json)
+
+# ImGui
 set(IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/imgui)
 add_library(imgui STATIC
     ${IMGUI_DIR}/imgui.cpp
@@ -37,12 +52,18 @@ add_executable(topogen
     delve_render.cpp
     isometric.cpp
     detail.cpp
+    hex.cpp
     basalt.cpp
     unbound_space.cpp
     crystal.cpp
     lava.cpp
     terrain_generator.cpp
+    game/game.cpp
+    game/input.cpp
+    game/camera.cpp
+    game/sprite.cpp
+    game/render_system.cpp
 )
 
-target_link_libraries(topogen PRIVATE SDL3::SDL3 imgui)
+target_link_libraries(topogen PRIVATE SDL3::SDL3 imgui EnTT::EnTT nlohmann_json::nlohmann_json)
 target_include_directories(topogen PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

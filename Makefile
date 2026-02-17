@@ -85,6 +85,51 @@ rebuild_cache:
 rebuild_cache/fast: rebuild_cache
 .PHONY : rebuild_cache/fast
 
+# Special rule for the target list_install_components
+list_install_components:
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --cyan "Available install components are: \"Unspecified\""
+.PHONY : list_install_components
+
+# Special rule for the target list_install_components
+list_install_components/fast: list_install_components
+.PHONY : list_install_components/fast
+
+# Special rule for the target install
+install: preinstall
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --cyan "Install the project..."
+	/usr/bin/cmake -P cmake_install.cmake
+.PHONY : install
+
+# Special rule for the target install
+install/fast: preinstall/fast
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --cyan "Install the project..."
+	/usr/bin/cmake -P cmake_install.cmake
+.PHONY : install/fast
+
+# Special rule for the target install/local
+install/local: preinstall
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --cyan "Installing only the local directory..."
+	/usr/bin/cmake -DCMAKE_INSTALL_LOCAL_ONLY=1 -P cmake_install.cmake
+.PHONY : install/local
+
+# Special rule for the target install/local
+install/local/fast: preinstall/fast
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --cyan "Installing only the local directory..."
+	/usr/bin/cmake -DCMAKE_INSTALL_LOCAL_ONLY=1 -P cmake_install.cmake
+.PHONY : install/local/fast
+
+# Special rule for the target install/strip
+install/strip: preinstall
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --cyan "Installing the project stripped..."
+	/usr/bin/cmake -DCMAKE_INSTALL_DO_STRIP=1 -P cmake_install.cmake
+.PHONY : install/strip
+
+# Special rule for the target install/strip
+install/strip/fast: preinstall/fast
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --cyan "Installing the project stripped..."
+	/usr/bin/cmake -DCMAKE_INSTALL_DO_STRIP=1 -P cmake_install.cmake
+.PHONY : install/strip/fast
+
 # The main all target
 all: cmake_check_build_system
 	$(CMAKE_COMMAND) -E cmake_progress_start /home/neto/Projects/Topo/CMakeFiles /home/neto/Projects/Topo//CMakeFiles/progress.marks
@@ -261,6 +306,126 @@ detail.s: detail.cpp.s
 detail.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/detail.cpp.s
 .PHONY : detail.cpp.s
+
+game/camera.o: game/camera.cpp.o
+.PHONY : game/camera.o
+
+# target to build an object file
+game/camera.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/game/camera.cpp.o
+.PHONY : game/camera.cpp.o
+
+game/camera.i: game/camera.cpp.i
+.PHONY : game/camera.i
+
+# target to preprocess a source file
+game/camera.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/game/camera.cpp.i
+.PHONY : game/camera.cpp.i
+
+game/camera.s: game/camera.cpp.s
+.PHONY : game/camera.s
+
+# target to generate assembly for a file
+game/camera.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/game/camera.cpp.s
+.PHONY : game/camera.cpp.s
+
+game/game.o: game/game.cpp.o
+.PHONY : game/game.o
+
+# target to build an object file
+game/game.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/game/game.cpp.o
+.PHONY : game/game.cpp.o
+
+game/game.i: game/game.cpp.i
+.PHONY : game/game.i
+
+# target to preprocess a source file
+game/game.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/game/game.cpp.i
+.PHONY : game/game.cpp.i
+
+game/game.s: game/game.cpp.s
+.PHONY : game/game.s
+
+# target to generate assembly for a file
+game/game.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/game/game.cpp.s
+.PHONY : game/game.cpp.s
+
+game/input.o: game/input.cpp.o
+.PHONY : game/input.o
+
+# target to build an object file
+game/input.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/game/input.cpp.o
+.PHONY : game/input.cpp.o
+
+game/input.i: game/input.cpp.i
+.PHONY : game/input.i
+
+# target to preprocess a source file
+game/input.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/game/input.cpp.i
+.PHONY : game/input.cpp.i
+
+game/input.s: game/input.cpp.s
+.PHONY : game/input.s
+
+# target to generate assembly for a file
+game/input.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/game/input.cpp.s
+.PHONY : game/input.cpp.s
+
+game/render_system.o: game/render_system.cpp.o
+.PHONY : game/render_system.o
+
+# target to build an object file
+game/render_system.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/game/render_system.cpp.o
+.PHONY : game/render_system.cpp.o
+
+game/render_system.i: game/render_system.cpp.i
+.PHONY : game/render_system.i
+
+# target to preprocess a source file
+game/render_system.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/game/render_system.cpp.i
+.PHONY : game/render_system.cpp.i
+
+game/render_system.s: game/render_system.cpp.s
+.PHONY : game/render_system.s
+
+# target to generate assembly for a file
+game/render_system.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/game/render_system.cpp.s
+.PHONY : game/render_system.cpp.s
+
+game/sprite.o: game/sprite.cpp.o
+.PHONY : game/sprite.o
+
+# target to build an object file
+game/sprite.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/game/sprite.cpp.o
+.PHONY : game/sprite.cpp.o
+
+game/sprite.i: game/sprite.cpp.i
+.PHONY : game/sprite.i
+
+# target to preprocess a source file
+game/sprite.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/game/sprite.cpp.i
+.PHONY : game/sprite.cpp.i
+
+game/sprite.s: game/sprite.cpp.s
+.PHONY : game/sprite.s
+
+# target to generate assembly for a file
+game/sprite.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/topogen.dir/build.make CMakeFiles/topogen.dir/game/sprite.cpp.s
+.PHONY : game/sprite.cpp.s
 
 gpu.o: gpu.cpp.o
 .PHONY : gpu.o
@@ -629,6 +794,10 @@ help:
 	@echo "... clean"
 	@echo "... depend"
 	@echo "... edit_cache"
+	@echo "... install"
+	@echo "... install/local"
+	@echo "... install/strip"
+	@echo "... list_install_components"
 	@echo "... rebuild_cache"
 	@echo "... imgui"
 	@echo "... topogen"
@@ -647,6 +816,21 @@ help:
 	@echo "... detail.o"
 	@echo "... detail.i"
 	@echo "... detail.s"
+	@echo "... game/camera.o"
+	@echo "... game/camera.i"
+	@echo "... game/camera.s"
+	@echo "... game/game.o"
+	@echo "... game/game.i"
+	@echo "... game/game.s"
+	@echo "... game/input.o"
+	@echo "... game/input.i"
+	@echo "... game/input.s"
+	@echo "... game/render_system.o"
+	@echo "... game/render_system.i"
+	@echo "... game/render_system.s"
+	@echo "... game/sprite.o"
+	@echo "... game/sprite.i"
+	@echo "... game/sprite.s"
 	@echo "... gpu.o"
 	@echo "... gpu.i"
 	@echo "... gpu.s"

@@ -1,64 +1,42 @@
 #include "terrain_generator.h"
 #include "basalt.h"
 #include "config.h"
+#include "flood_fill.h"
 #include "lava.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
-#include <queue>
 
 static std::vector<UnusedRegion>
 detect_unused_regions(std::span<const int16_t> terrain_map,
                       std::span<const float> heightmap, int width, int height) {
-  std::vector<uint8_t> visited(width * height, 0);
+  auto pixel_groups = flood_fill_regions(
+      width, height,
+      [&](int idx) { return terrain_map[idx] >= TERRAIN_EMPTY; }, 50);
+
   std::vector<UnusedRegion> regions;
-  const int dirs[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+  regions.reserve(pixel_groups.size());
 
-  for (int sy = 0; sy < height; ++sy) {
-    for (int sx = 0; sx < width; ++sx) {
-      int start = sy * width + sx;
-      if (terrain_map[start] < TERRAIN_EMPTY || visited[start])
-        continue;
+  for (auto &pixels : pixel_groups) {
+    UnusedRegion region;
+    region.pixels = std::move(pixels);
 
-      UnusedRegion region;
-      region.min_x = (float)sx;
-      region.max_x = (float)sx;
-      region.min_y = (float)sy;
-      region.max_y = (float)sy;
-      float sum_h = 0;
-
-      std::queue<int> q;
-      q.push(start);
-      visited[start] = 1;
-
-      while (!q.empty()) {
-        int idx = q.front();
-        q.pop();
-        int cx = idx % width, cy = idx / width;
-        region.pixels.push_back(idx);
-        sum_h += heightmap[idx];
-
-        region.min_x = std::min(region.min_x, (float)cx);
-        region.max_x = std::max(region.max_x, (float)cx);
-        region.min_y = std::min(region.min_y, (float)cy);
-        region.max_y = std::max(region.max_y, (float)cy);
-
-        for (auto [dx, dy] : dirs) {
-          int nx = cx + dx, ny = cy + dy;
-          if (nx < 0 || ny < 0 || nx >= width || ny >= height)
-            continue;
-          int nidx = ny * width + nx;
-          if (!visited[nidx] && terrain_map[nidx] >= TERRAIN_EMPTY) {
-            visited[nidx] = 1;
-            q.push(nidx);
-          }
-        }
-      }
-
-      region.avg_elevation = sum_h / region.pixels.size();
-
-      if ((int)region.pixels.size() >= 50)
-        regions.push_back(std::move(region));
+    float sum_h = 0;
+    float min_x = 1e9f, max_x = -1e9f, min_y = 1e9f, max_y = -1e9f;
+    for (int idx : region.pixels) {
+      int cx = idx % width, cy = idx / width;
+      sum_h += heightmap[idx];
+      min_x = std::min(min_x, (float)cx);
+      max_x = std::max(max_x, (float)cx);
+      min_y = std::min(min_y, (float)cy);
+      max_y = std::max(max_y, (float)cy);
     }
+    region.avg_elevation = sum_h / region.pixels.size();
+    region.min_x = min_x;
+    region.max_x = max_x;
+    region.min_y = min_y;
+    region.max_y = max_y;
+
+    regions.push_back(std::move(region));
   }
 
   return regions;

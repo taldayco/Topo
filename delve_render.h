@@ -3,15 +3,10 @@
 #include "contour.h"
 #include "detail.h"
 #include "palettes.h"
+#include "types.h"
 #include <cstdint>
 #include <span>
 #include <vector>
-
-struct PixelBuffer {
-  std::vector<uint32_t> pixels;
-  int width;
-  int height;
-};
 
 PixelBuffer generate_map_pixels(std::span<const float> heightmap,
                                 std::span<const int> band_map,

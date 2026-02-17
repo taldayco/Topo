@@ -1,4 +1,5 @@
 #include "delve_render.h"
+#include "color.h"
 #include "config.h"
 #include "isometric.h"
 #include <SDL3/SDL_log.h>
@@ -39,18 +40,10 @@ static void draw_line_soft(std::vector<uint32_t> &pixels, int width, int height,
           float falloff = std::max(0.0f, 1.0f - dist * 0.5f);
           uint8_t aa_alpha = (uint8_t)(alpha * falloff);
 
-          uint32_t dst = pixels[y * width + x];
-          uint8_t dst_r = (dst >> 16) & 0xFF;
-          uint8_t dst_g = (dst >> 8) & 0xFF;
-          uint8_t dst_b = dst & 0xFF;
-
-          float blend = aa_alpha / 255.0f;
-          uint8_t out_r = r * blend + dst_r * (1.0f - blend);
-          uint8_t out_g = g * blend + dst_g * (1.0f - blend);
-          uint8_t out_b = b * blend + dst_b * (1.0f - blend);
-
+          uint32_t src_color = 0xFF000000 | (r << 16) | (g << 8) | b;
           pixels[y * width + x] =
-              0xFF000000 | (out_r << 16) | (out_g << 8) | out_b;
+              alpha_blend(src_color, pixels[y * width + x],
+                          aa_alpha / 255.0f);
         }
       }
     }
@@ -75,7 +68,7 @@ PixelBuffer generate_map_pixels(std::span<const float> heightmap,
     params.tile_height = Config::ISO_TILE_HEIGHT;
     params.height_scale = Config::ISO_HEIGHT_SCALE;
 
-    IsometricView iso_view = create_isometric_heightmap(
+    PixelBuffer iso_view = create_isometric_heightmap(
         heightmap, band_map, contour_lines, width, height, params, palette,
         contour_opacity, iso_padding, iso_offset_x_adjust, iso_offset_y_adjust);
     buf.pixels = std::move(iso_view.pixels);
@@ -86,48 +79,8 @@ PixelBuffer generate_map_pixels(std::span<const float> heightmap,
 
     SDL_Log("Isometric view: %dx%d", buf.width, buf.height);
 
-    const float HEX_SIZE = 8.0f;
-    const float sqrt3 = 1.732f;
-    const uint32_t BACKGROUND = 0xFF2D2D30;
-
-    for (int y = 0; y < buf.height; ++y) {
-      for (int x = 0; x < buf.width; ++x) {
-        int idx = y * buf.width + x;
-        uint32_t pixel = buf.pixels[idx];
-
-        if (pixel == BACKGROUND)
-          continue;
-
-        float q = x / (HEX_SIZE * sqrt3);
-        float r = y / HEX_SIZE - q * 0.5f;
-
-        int iq = (int)std::round(q);
-        int ir = (int)std::round(r);
-        int is = (int)std::round(-q - r);
-
-        float dq = std::abs(iq - q);
-        float dr = std::abs(ir - r);
-        float ds = std::abs(is - (-q - r));
-
-        if (dq > dr && dq > ds) {
-          iq = -ir - is;
-        } else if (dr > ds) {
-          ir = -iq - is;
-        }
-
-        uint32_t hash = ((uint32_t)iq * 374761393) ^ ((uint32_t)ir * 668265263);
-        float threshold = ((hash & 0xFF) / 255.0f - 0.5f) * 0.25f;
-
-        uint8_t r_out = std::clamp(
-            (int)(((pixel >> 16) & 0xFF) * (1.0f + threshold)), 0, 255);
-        uint8_t g_out = std::clamp(
-            (int)(((pixel >> 8) & 0xFF) * (1.0f + threshold)), 0, 255);
-        uint8_t b_out =
-            std::clamp((int)((pixel & 0xFF) * (1.0f + threshold)), 0, 255);
-
-        buf.pixels[idx] = 0xFF000000 | (r_out << 16) | (g_out << 8) | b_out;
-      }
-    }
+    apply_hex_dither(buf.pixels, buf.width, buf.height, 0.25f,
+                     Config::BACKGROUND_COLOR);
 
   } else {
     buf.width = width;
