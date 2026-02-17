@@ -1,4 +1,4 @@
-#include "water.h"
+#include "lava.h"
 #include "basalt.h"
 #include "config.h"
 #include "terrain_generator.h"
@@ -150,7 +150,7 @@ static void trace_outline_4connected(const std::vector<uint8_t> &mask, int W,
 }
 
 static void build_triangle_mesh_from_polygon(const std::vector<P2> &poly,
-                                             float z, WaterMesh &mesh_out) {
+                                             float z, LavaMesh &mesh_out) {
   mesh_out.vertices.clear();
   mesh_out.grid_width = 0;
   mesh_out.grid_height = 0;
@@ -166,9 +166,9 @@ static void build_triangle_mesh_from_polygon(const std::vector<P2> &poly,
     const P2 &a = poly[tri_idx[i + 0]];
     const P2 &b = poly[tri_idx[i + 1]];
     const P2 &c = poly[tri_idx[i + 2]];
-    WaterVertex va{a.x, a.y, z};
-    WaterVertex vb{b.x, b.y, z};
-    WaterVertex vc{c.x, c.y, z};
+    LavaVertex va{a.x, a.y, z};
+    LavaVertex vb{b.x, b.y, z};
+    LavaVertex vc{c.x, c.y, z};
     mesh_out.vertices.push_back(va);
     mesh_out.vertices.push_back(vb);
     mesh_out.vertices.push_back(vc);
@@ -381,7 +381,7 @@ static void fill_holes_in_region(ChannelRegion &region, int width, int height) {
   }
 }
 std::vector<ChannelRegion>
-filter_water_channels(const std::vector<ChannelRegion> &regions,
+filter_lava_channels(const std::vector<ChannelRegion> &regions,
                       std::span<const float> heightmap, int width, int height) {
 
   std::vector<ChannelRegion> candidates;
@@ -395,7 +395,7 @@ filter_water_channels(const std::vector<ChannelRegion> &regions,
     bool touches_boundary = (region.min_x <= 1 || region.max_x >= width - 2 ||
                              region.min_y <= 1 || region.max_y >= height - 2);
 
-    // Different water types
+    // Different lava types
     bool is_river = region.aspect_ratio > 2.0f && region.pixels.size() > 800;
     bool is_pool = region.pixels.size() > 300 && region.pixels.size() < 5000;
     bool is_lake = region.pixels.size() > 2000;
@@ -409,7 +409,7 @@ filter_water_channels(const std::vector<ChannelRegion> &regions,
     }
   }
 
-  SDL_Log("Phase 3.1: Filtered %zu water channel candidates from %zu regions",
+  SDL_Log("Phase 3.1: Filtered %zu lava channel candidates from %zu regions",
           candidates.size(), regions.size());
 
   if (!candidates.empty()) {
@@ -456,7 +456,7 @@ static void densify_region(std::vector<int> &pixels, int width, int height) {
 
   pixels.insert(pixels.end(), to_add.begin(), to_add.end());
 }
-static WaterBody channel_to_water_body(const ChannelRegion &channel,
+static LavaBody channel_to_lava_body(const ChannelRegion &channel,
                                        std::span<const float> heightmap,
                                        int width, int height, int channel_idx) {
   std::vector<uint8_t> mask(width * height, 0);
@@ -480,47 +480,47 @@ static WaterBody channel_to_water_body(const ChannelRegion &channel,
     return {};
   }
 
-  WaterBody water;
-  water.plateau_index = -1;
-  water.height = avg_h - 0.15f;
-  water.min_x = channel.min_x;
-  water.max_x = channel.max_x;
-  water.min_y = channel.min_y;
-  water.max_y = channel.max_y;
-  water.aspect_ratio = channel.aspect_ratio;
-  water.pixels = channel.pixels;
-  densify_region(water.pixels, width, height);
-  water.time_offset = (hash1d(channel_idx) % 1000) / 1000.0f * 6.283185f;
+  LavaBody lava;
+  lava.plateau_index = -1;
+  lava.height = avg_h - 0.15f;
+  lava.min_x = channel.min_x;
+  lava.max_x = channel.max_x;
+  lava.min_y = channel.min_y;
+  lava.max_y = channel.max_y;
+  lava.aspect_ratio = channel.aspect_ratio;
+  lava.pixels = channel.pixels;
+  densify_region(lava.pixels, width, height);
+  lava.time_offset = (hash1d(channel_idx) % 1000) / 1000.0f * 6.283185f;
 
-  build_triangle_mesh_from_polygon(poly, water.height, water.mesh);
+  build_triangle_mesh_from_polygon(poly, lava.height, lava.mesh);
 
-  SDL_Log("Channel %d: Created water body with %zu vertices", channel_idx,
-          water.mesh.vertices.size());
+  SDL_Log("Channel %d: Created lava body with %zu vertices", channel_idx,
+          lava.mesh.vertices.size());
 
-  return water;
+  return lava;
 }
 
-std::vector<WaterBody>
-channels_to_water_bodies(const std::vector<ChannelRegion> &channels,
+std::vector<LavaBody>
+channels_to_lava_bodies(const std::vector<ChannelRegion> &channels,
                          std::span<const float> heightmap, int width,
                          int height) {
 
-  std::vector<WaterBody> water_bodies;
+  std::vector<LavaBody> lava_bodies;
 
   for (size_t i = 0; i < channels.size(); ++i) {
-    WaterBody water =
-        channel_to_water_body(channels[i], heightmap, width, height, (int)i);
-    if (!water.mesh.vertices.empty()) {
-      water_bodies.push_back(std::move(water));
+    LavaBody lava =
+        channel_to_lava_body(channels[i], heightmap, width, height, (int)i);
+    if (!lava.mesh.vertices.empty()) {
+      lava_bodies.push_back(std::move(lava));
     }
   }
 
-  SDL_Log("Created %zu water bodies from %zu channels", water_bodies.size(),
+  SDL_Log("Created %zu lava bodies from %zu channels", lava_bodies.size(),
           channels.size());
-  return water_bodies;
+  return lava_bodies;
 }
-std::vector<WaterBody>
-identify_water_bodies(std::span<const float> heightmap, int width, int height,
+std::vector<LavaBody>
+identify_lava_bodies(std::span<const float> heightmap, int width, int height,
                       const std::vector<Plateau> &plateaus,
                       const std::vector<int> &plateaus_with_columns) {
   std::unordered_set<int> used(plateaus_with_columns.begin(),
@@ -535,7 +535,7 @@ identify_water_bodies(std::span<const float> heightmap, int width, int height,
       candidates.push_back((int)i);
 
   if (candidates.empty()) {
-    SDL_Log("Water: no unused plateaus available");
+    SDL_Log("Lava: no unused plateaus available");
     return {};
   }
 
@@ -548,7 +548,7 @@ identify_water_bodies(std::span<const float> heightmap, int width, int height,
   if ((int)candidates.size() > 3)
     candidates.resize(3);
 
-  std::vector<WaterBody> out;
+  std::vector<LavaBody> out;
 
   for (int pi : candidates) {
     const auto &plat = plateaus[pi];
@@ -570,11 +570,11 @@ identify_water_bodies(std::span<const float> heightmap, int width, int height,
     std::vector<P2> poly_px;
     trace_outline_4connected(mask, width, height, poly_px);
     if (poly_px.size() < 3) {
-      SDL_Log("Water: plateau %d produced no polygon outline", pi);
+      SDL_Log("Lava: plateau %d produced no polygon outline", pi);
       continue;
     }
 
-    float water_h = (std::fabs(plat.height - min_plateau_h) <= 1e-4f)
+    float lava_h = (std::fabs(plat.height - min_plateau_h) <= 1e-4f)
                         ? plat.height
                         : (plat.height - 0.015f);
 
@@ -583,30 +583,30 @@ identify_water_bodies(std::span<const float> heightmap, int width, int height,
     for (const auto &p : poly_px)
       poly_world.push_back({p.x, p.y});
 
-    WaterBody water;
-    water.plateau_index = pi;
-    water.height = water_h;
-    water.min_x = min_x;
-    water.max_x = max_x;
-    water.min_y = min_y;
-    water.max_y = max_y;
+    LavaBody lava;
+    lava.plateau_index = pi;
+    lava.height = lava_h;
+    lava.min_x = min_x;
+    lava.max_x = max_x;
+    lava.min_y = min_y;
+    lava.max_y = max_y;
     float w = max_x - min_x + 1.f, h = max_y - min_y + 1.f;
-    water.aspect_ratio = std::max(w, h) / std::max(1.0f, std::min(w, h));
-    water.pixels = plat.pixels;
-    water.time_offset = (hash1d(pi) % 1000) / 1000.0f * 6.283185f;
+    lava.aspect_ratio = std::max(w, h) / std::max(1.0f, std::min(w, h));
+    lava.pixels = plat.pixels;
+    lava.time_offset = (hash1d(pi) % 1000) / 1000.0f * 6.283185f;
 
-    build_triangle_mesh_from_polygon(poly_world, water.height, water.mesh);
+    build_triangle_mesh_from_polygon(poly_world, lava.height, lava.mesh);
 
-    if (!water.mesh.vertices.empty())
-      out.push_back(std::move(water));
+    if (!lava.mesh.vertices.empty())
+      out.push_back(std::move(lava));
   }
 
-  SDL_Log("Water: produced %zu triangle bodies from %zu unused candidates",
+  SDL_Log("Lava: produced %zu triangle bodies from %zu unused candidates",
           out.size(), candidates.size());
   return out;
 }
 
-float get_water_height(float x, float y, float base_z, float time,
+float get_lava_height(float x, float y, float base_z, float time,
                        float time_offset) {
   float t = time + time_offset;
   float wave1 = std::sin(x * 0.3f + t) * 0.02f;
@@ -615,7 +615,7 @@ float get_water_height(float x, float y, float base_z, float time,
   return base_z + wave1 + wave2 + wave3;
 }
 
-static void draw_water_triangle(std::vector<uint32_t> &pixels, int width,
+static void draw_lava_triangle(std::vector<uint32_t> &pixels, int width,
                                 int height, float ax, float ay, float bx,
                                 float by, float cx, float cy, uint32_t color) {
   float min_x = std::min({ax, bx, cx}), max_x = std::max({ax, bx, cx});
@@ -642,16 +642,16 @@ static void draw_water_triangle(std::vector<uint32_t> &pixels, int width,
   }
 }
 
-void render_water(std::vector<uint32_t> &pixels, int view_w, int view_h,
-                  const std::vector<WaterBody> &water_bodies, float off_x,
+void render_lava(std::vector<uint32_t> &pixels, int view_w, int view_h,
+                  const std::vector<LavaBody> &lava_bodies, float off_x,
                   float off_y, const IsometricParams &params, float time) {
 
-  for (const auto &water : water_bodies) {
-    for (int idx : water.pixels) {
+  for (const auto &lava : lava_bodies) {
+    for (int idx : lava.pixels) {
       int px = idx % Config::MAP_WIDTH;
       int py = idx / Config::MAP_WIDTH;
 
-      float z = get_water_height(px, py, water.height, time, water.time_offset);
+      float z = get_lava_height(px, py, lava.height, time, lava.time_offset);
 
       float iso_x, iso_y;
       world_to_iso(px, py, z, iso_x, iso_y, params);
@@ -660,11 +660,11 @@ void render_water(std::vector<uint32_t> &pixels, int view_w, int view_h,
 
       // Calculate color once
       float depth_factor =
-          std::clamp(0.9f + (z - water.height) * 2.0f, 0.8f, 1.1f);
+          std::clamp(0.9f + (z - lava.height) * 2.0f, 0.8f, 1.1f);
       uint8_t r =
-          (uint8_t)(((Config::WATER_COLOR >> 16) & 0xFF) * depth_factor);
-      uint8_t g = (uint8_t)(((Config::WATER_COLOR >> 8) & 0xFF) * depth_factor);
-      uint8_t b = (uint8_t)((Config::WATER_COLOR & 0xFF) * depth_factor);
+          (uint8_t)(((Config::LAVA_COLOR >> 16) & 0xFF) * depth_factor);
+      uint8_t g = (uint8_t)(((Config::LAVA_COLOR >> 8) & 0xFF) * depth_factor);
+      uint8_t b = (uint8_t)((Config::LAVA_COLOR & 0xFF) * depth_factor);
       uint32_t color = 0xFF000000 | (r << 16) | (g << 8) | b;
 
       // Draw with circular kernel (radius 2) for coverage - ~13 pixels instead

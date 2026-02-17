@@ -5,7 +5,7 @@
 #include <span>
 #include <vector>
 
-struct WaterBody;
+struct LavaBody;
 
 struct IsometricParams {
   float tile_width = 2.0f;

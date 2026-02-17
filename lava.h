@@ -1,4 +1,4 @@
-// water.h  (additions are minimal and self-contained)
+// lava.h  (additions are minimal and self-contained)
 #pragma once
 #include "basalt.h"
 #include "contour.h"
@@ -13,19 +13,19 @@ struct ChannelRegion {
   float aspect_ratio;
   float avg_elevation;
 };
-struct WaterVertex {
+struct LavaVertex {
   float x, y;
   float base_z;
 };
 
-struct WaterMesh {
-  std::vector<WaterVertex> vertices;
+struct LavaMesh {
+  std::vector<LavaVertex> vertices;
   int grid_width = 0;
   int grid_height = 0;
   std::vector<uint8_t> active;
 };
 
-struct WaterBody {
+struct LavaBody {
   int plateau_index = -1;
   float height = 0.f;
   float min_x = 0, max_x = 0;
@@ -33,7 +33,7 @@ struct WaterBody {
   float aspect_ratio = 0.f;
   std::vector<int> pixels;
   float time_offset = 0.f;
-  WaterMesh mesh;
+  LavaMesh mesh;
   std::unordered_set<int> pixel_set;
 };
 
@@ -48,25 +48,25 @@ extract_channel_spaces(std::span<const int16_t> terrain_map, int width,
                        int height, std::span<const float> heightmap);
 
 std::vector<ChannelRegion>
-filter_water_channels(const std::vector<ChannelRegion> &regions,
+filter_lava_channels(const std::vector<ChannelRegion> &regions,
                       std::span<const float> heightmap, int width, int height);
-std::vector<WaterBody>
-channels_to_water_bodies(const std::vector<ChannelRegion> &channels,
+std::vector<LavaBody>
+channels_to_lava_bodies(const std::vector<ChannelRegion> &channels,
                          std::span<const float> heightmap, int width,
                          int height);
-std::vector<WaterBody>
-identify_water_bodies(std::span<const float> heightmap, int width, int height,
+std::vector<LavaBody>
+identify_lava_bodies(std::span<const float> heightmap, int width, int height,
                       const std::vector<Plateau> &plateaus,
                       const std::vector<int> &plateaus_with_columns);
 
-void generate_water_mesh_masked(WaterBody &water,
+void generate_lava_mesh_masked(LavaBody &lava,
                                 const std::vector<uint8_t> &mask, int mask_w,
                                 int mask_h, float grid_spacing);
 
-float get_water_height(float x, float y, float base_z, float time,
+float get_lava_height(float x, float y, float base_z, float time,
                        float time_offset);
 
-void render_water(std::vector<uint32_t> &pixels, int view_width,
-                  int view_height, const std::vector<WaterBody> &water_bodies,
+void render_lava(std::vector<uint32_t> &pixels, int view_width,
+                  int view_height, const std::vector<LavaBody> &lava_bodies,
                   float offset_x, float offset_y,
                   const struct IsometricParams &params, float time);

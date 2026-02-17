@@ -10,7 +10,7 @@ struct Palette {
 
 static const Palette PALETTES[] = {
     {"Grayscale",
-     {0xFF1A1A1A, 0xFF3A3A3A, 0xFF6A6A6A, 0xFF9A9A9A, 0xFFCACACA, 0xFF000000}}};
+     {0xFF3A3A3A, 0xFF3A3A3A, 0xFF6A6A6A, 0xFF9A9A9A, 0xFFCACACA, 0xFF000000}}};
 
 static constexpr int PALETTE_COUNT = sizeof(PALETTES) / sizeof(Palette);
 

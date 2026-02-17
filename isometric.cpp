@@ -1,8 +1,10 @@
 #include "isometric.h"
 #include "basalt.h"
 #include "config.h"
+#include "unbound_space.h"
 #include "terrain_generator.h"
-#include "water.h"
+#include "crystal.h"
+#include "lava.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>
@@ -92,64 +94,20 @@ IsometricView create_isometric_heightmap(
   float offset_x = -min_x + padding + offset_x_adjust;
   float offset_y = -min_y + padding + offset_y_adjust;
 
-  // Debug: draw unused regions with translucent per-region colors (before
-  // basalt/water so they occlude)
   if (Config::enable_debug_overlay) {
-    constexpr float ALPHA = 0.35f;
-    for (size_t ri = 0; ri < terrain.unused_regions.size(); ++ri) {
-      const auto &region = terrain.unused_regions[ri];
-      uint8_t cr, cg, cb;
-      if (region.type == RegionType::Marble) {
-        // Dark purple
-        cr = 80;
-        cg = 0;
-        cb = 120;
-      } else {
-        // Green
-        cr = 0;
-        cg = 140;
-        cb = 0;
-      }
-
-      for (int idx : region.pixels) {
-        int wx = idx % map_width;
-        int wy = idx / map_width;
-        float z = heightmap[idx];
-
-        float iso_x, iso_y;
-        world_to_iso((float)wx, (float)wy, z, iso_x, iso_y, params);
-        int sx = (int)(iso_x + offset_x);
-        int sy = (int)(iso_y + offset_y);
-
-        constexpr int R = 2;
-        for (int dy = -R; dy <= R; ++dy) {
-          for (int dx = -R; dx <= R; ++dx) {
-            if (dx * dx + dy * dy > R * R)
-              continue;
-            int px = sx + dx;
-            int py = sy + dy;
-            if (px >= 0 && px < view_width && py >= 0 && py < view_height) {
-              uint32_t dst = view.pixels[py * view_width + px];
-              uint8_t dr = (dst >> 16) & 0xFF;
-              uint8_t dg = (dst >> 8) & 0xFF;
-              uint8_t db = dst & 0xFF;
-              uint8_t out_r = (uint8_t)(cr * ALPHA + dr * (1.0f - ALPHA));
-              uint8_t out_g = (uint8_t)(cg * ALPHA + dg * (1.0f - ALPHA));
-              uint8_t out_b = (uint8_t)(cb * ALPHA + db * (1.0f - ALPHA));
-              view.pixels[py * view_width + px] =
-                  0xFF000000 | (out_r << 16) | (out_g << 8) | out_b;
-            }
-          }
-        }
-      }
-    }
+    render_unbound_space_debug_overlay(view.pixels, view_width, view_height,
+        terrain.unused_regions, heightmap, map_width,
+        offset_x, offset_y, params);
+    render_crystal_debug_overlay(view.pixels, view_width, view_height,
+        terrain.unused_regions, heightmap, map_width,
+        offset_x, offset_y, params);
   }
 
   render_basalt_columns(view.pixels, view_width, view_height, terrain.columns,
                         Config::HEX_SIZE, offset_x, offset_y, params, palette);
 
   float time = SDL_GetTicks() / 1000.0f;
-  render_water(view.pixels, view_width, view_height, terrain.water_bodies,
+  render_lava(view.pixels, view_width, view_height, terrain.lava_bodies,
                offset_x, offset_y, params, time);
 
   uint32_t line_color = ((uint8_t)(contour_opacity * 255) << 24) | 0x00DDDDDD;

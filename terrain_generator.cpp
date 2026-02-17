@@ -1,7 +1,7 @@
 #include "terrain_generator.h"
 #include "basalt.h"
 #include "config.h"
-#include "water.h"
+#include "lava.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <queue>
@@ -87,26 +87,26 @@ TerrainGenerator::generate(std::span<const float> heightmap,
   SDL_Log("TerrainGenerator: Generated %zu columns on %zu plateaus",
           data.columns.size(), data.plateaus_with_columns.size());
 
-  // Water detection reads terrain_map for gaps (TERRAIN_EMPTY)
+  // Lava detection reads terrain_map for gaps (TERRAIN_EMPTY)
   auto channel_regions =
       extract_channel_spaces(data.terrain_map, width, height, heightmap);
   SDL_Log("TerrainGenerator: Found %zu channel regions",
           channel_regions.size());
 
-  auto water_channels =
-      filter_water_channels(channel_regions, heightmap, width, height);
-  SDL_Log("TerrainGenerator: Selected %zu water channels",
-          water_channels.size());
-  data.water_bodies =
-      channels_to_water_bodies(water_channels, heightmap, width, height);
-  SDL_Log("TerrainGenerator: Created %zu water bodies",
-          data.water_bodies.size());
+  auto lava_channels =
+      filter_lava_channels(channel_regions, heightmap, width, height);
+  SDL_Log("TerrainGenerator: Selected %zu lava channels",
+          lava_channels.size());
+  data.lava_bodies =
+      channels_to_lava_bodies(lava_channels, heightmap, width, height);
+  SDL_Log("TerrainGenerator: Created %zu lava bodies",
+          data.lava_bodies.size());
 
-  // Mark water pixels in terrain_map
-  for (const auto& wb : data.water_bodies)
+  // Mark lava pixels in terrain_map
+  for (const auto& wb : data.lava_bodies)
     for (int idx : wb.pixels)
       if (idx >= 0 && idx < width * height)
-        data.terrain_map[idx] = TERRAIN_WATER;
+        data.terrain_map[idx] = TERRAIN_LAVA;
 
   // Detect unused regions (flood-fill on TERRAIN_EMPTY)
   data.unused_regions = detect_unused_regions(data.terrain_map, heightmap,
@@ -114,7 +114,7 @@ TerrainGenerator::generate(std::span<const float> heightmap,
   SDL_Log("TerrainGenerator: Found %zu unused regions (>= 50 pixels)",
           data.unused_regions.size());
 
-  // Classify: largest 3 regions are Marble, rest are Void
+  // Classify: largest 3 regions are UnboundSpace, rest are Crystal
   if (!data.unused_regions.empty()) {
     std::vector<size_t> indices(data.unused_regions.size());
     for (size_t i = 0; i < indices.size(); ++i) indices[i] = i;
@@ -126,7 +126,7 @@ TerrainGenerator::generate(std::span<const float> heightmap,
                                data.unused_regions[b].pixels.size();
                       });
     for (size_t i = 0; i < std::min<size_t>(3, indices.size()); ++i)
-      data.unused_regions[indices[i]].type = RegionType::Marble;
+      data.unused_regions[indices[i]].type = RegionType::UnboundSpace;
   }
 
   return data;

@@ -38,7 +38,9 @@ add_executable(topogen
     isometric.cpp
     detail.cpp
     basalt.cpp
-    water.cpp
+    unbound_space.cpp
+    crystal.cpp
+    lava.cpp
     terrain_generator.cpp
 )
 
