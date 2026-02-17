@@ -2,7 +2,6 @@
 #include "basalt.h"
 #include "config.h"
 #include "terrain_generator.h"
-#include "util.h"
 #include "water.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -102,10 +101,14 @@ IsometricView create_isometric_heightmap(
       uint8_t cr, cg, cb;
       if (region.type == RegionType::Marble) {
         // Dark purple
-        cr = 80; cg = 0; cb = 120;
+        cr = 80;
+        cg = 0;
+        cb = 120;
       } else {
         // Green
-        cr = 0; cg = 140; cb = 0;
+        cr = 0;
+        cg = 140;
+        cb = 0;
       }
 
       for (int idx : region.pixels) {
