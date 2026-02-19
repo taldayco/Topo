@@ -30,7 +30,7 @@ FetchContent_Declare(json
 FetchContent_MakeAvailable(EnTT json)
 
 # ImGui
-set(IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/imgui)
+set(IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui)
 add_library(imgui STATIC
     ${IMGUI_DIR}/imgui.cpp
     ${IMGUI_DIR}/imgui_draw.cpp
@@ -42,28 +42,52 @@ add_library(imgui STATIC
 target_include_directories(imgui PUBLIC ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(imgui PUBLIC SDL3::SDL3)
 
-add_executable(topogen
-    main.cpp
-    gpu.cpp
-    imgui_ui.cpp
-    map_gen.cpp
-    noise.cpp
-    contour.cpp
-    delve_render.cpp
-    isometric.cpp
-    detail.cpp
-    hex.cpp
-    basalt.cpp
-    unbound_space.cpp
-    crystal.cpp
-    lava.cpp
-    terrain_generator.cpp
-    game/game.cpp
-    game/input.cpp
-    game/camera.cpp
-    game/sprite.cpp
-    game/render_system.cpp
+# ---- topo_engine (static library) ----
+add_library(topo_engine STATIC
+    src/engine/app.cpp
+    src/engine/gpu/gpu.cpp
+    src/engine/input/input.cpp
+    src/engine/camera/camera.cpp
+    src/engine/ui/imgui_ui.cpp
+    src/engine/render/sprite.cpp
+    src/engine/render/render_system.cpp
 )
 
-target_link_libraries(topogen PRIVATE SDL3::SDL3 imgui EnTT::EnTT nlohmann_json::nlohmann_json)
-target_include_directories(topogen PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(topo_engine PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/engine
+)
+
+target_link_libraries(topo_engine PUBLIC
+    SDL3::SDL3
+    imgui
+    EnTT::EnTT
+)
+
+# ---- topogen (executable) ----
+add_executable(topogen
+    src/game/main.cpp
+    src/game/topo_game.cpp
+    src/game/scenes/menu_scene.cpp
+    src/game/scenes/game_scene.cpp
+    src/game/scenes/pause_scene.cpp
+    src/game/terrain/noise.cpp
+    src/game/terrain/contour.cpp
+    src/game/terrain/hex.cpp
+    src/game/terrain/isometric.cpp
+    src/game/terrain/basalt.cpp
+    src/game/terrain/lava.cpp
+    src/game/terrain/detail.cpp
+    src/game/terrain/delve_render.cpp
+    src/game/terrain/terrain_generator.cpp
+    src/game/terrain/map_gen.cpp
+)
+
+target_include_directories(topogen PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/game
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/engine
+)
+
+target_link_libraries(topogen PRIVATE
+    topo_engine
+    nlohmann_json::nlohmann_json
+)
