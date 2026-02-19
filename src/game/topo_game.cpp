@@ -36,6 +36,7 @@ void TopoGame::switch_scene(SceneID id) {
 
 void TopoGame::on_init(GpuContext &gpu) {
   push_scene(SceneID::Game);
+  app_state.launch_game_requested = true;
 }
 
 void TopoGame::on_event(const SDL_Event &event) {
