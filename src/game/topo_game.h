@@ -2,6 +2,8 @@
 #include "app.h"
 #include "app_state.h"
 #include "scene/scene_manager.h"
+#include "terrain/terrain_renderer.h"
+#include "terrain/terrain_mesh.h"
 #include <entt/entt.hpp>
 
 enum class SceneID { None, Menu, Game, Pause };
@@ -11,6 +13,8 @@ public:
   entt::registry registry;
   AppState app_state;
   SceneManager scenes;
+  TerrainRenderer terrain_renderer;
+  TerrainMesh terrain_mesh;
 
   void push_scene(SceneID id);
   void pop_scene();

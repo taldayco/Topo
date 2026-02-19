@@ -3,6 +3,8 @@
 #include "scenes/menu_scene.h"
 #include "scenes/pause_scene.h"
 #include "terrain/map_gen.h"
+#include "terrain/noise.h"
+#include "terrain/contour.h"
 #include "terrain/palettes.h"
 #include "ui/imgui_ui.h"
 #include <imgui.h>
@@ -52,15 +54,48 @@ void TopoGame::on_render_tool(GpuContext &gpu, FrameContext &frame) {
 }
 
 void TopoGame::on_render_game(GpuContext &gpu, FrameContext &frame) {
-  if (app_state.need_regenerate)
-    regenerate_map(app_state, gpu.device, gpu.map_texture);
+  // Lazy-init the renderer on first game frame
+  if (!terrain_renderer.is_initialized()) {
+    terrain_renderer.init(gpu.device, gpu.game_window);
+  }
 
-  if (gpu.map_texture.texture)
-    gpu_blit_texture(frame, gpu.map_texture, app_state.view);
+  // Regenerate terrain mesh when needed
+  if (app_state.need_regenerate) {
+    SDL_Log("Starting GPU regeneration...");
+    auto start = SDL_GetTicks();
+
+    app_state.heightmap.resize(Config::MAP_WIDTH * Config::MAP_HEIGHT);
+    generate_heightmap(app_state.heightmap, Config::MAP_WIDTH,
+                       Config::MAP_HEIGHT, app_state.noise_params,
+                       app_state.map_scale);
+
+    app_state.contour_lines.clear();
+    extract_contours(app_state.heightmap, Config::MAP_WIDTH,
+                     Config::MAP_HEIGHT, app_state.contour_interval,
+                     app_state.contour_lines, app_state.band_map);
+
+    terrain_mesh = build_terrain_mesh(app_state);
+    terrain_renderer.upload_mesh(gpu.device, terrain_mesh);
+
+    app_state.need_regenerate = false;
+    SDL_Log("GPU regeneration: %llu ms", SDL_GetTicks() - start);
+  }
+
+  // Begin render pass and draw terrain
+  gpu_begin_render_pass(gpu, frame);
+
+  if (terrain_renderer.has_mesh()) {
+    float time = SDL_GetTicks() / 1000.0f;
+    SceneUniforms uniforms = compute_uniforms(
+        terrain_mesh, app_state.view, frame.swapchain_w, frame.swapchain_h,
+        time, app_state.contour_opacity);
+    terrain_renderer.draw(frame.render_pass, frame.cmd, uniforms);
+  }
 }
 
 void TopoGame::on_cleanup() {
   scenes.cleanup();
+  terrain_renderer.cleanup(gpu_ctx.device);
 }
 
 bool TopoGame::wants_game_window_open() {

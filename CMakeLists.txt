@@ -42,6 +42,45 @@ add_library(imgui STATIC
 target_include_directories(imgui PUBLIC ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(imgui PUBLIC SDL3::SDL3)
 
+# ---- Shader compilation ----
+find_program(GLSLC glslc REQUIRED)
+
+set(SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders)
+set(SHADER_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
+file(MAKE_DIRECTORY ${SHADER_OUT_DIR})
+
+set(SHADER_SOURCES
+    ${SHADER_DIR}/terrain.vert.glsl
+    ${SHADER_DIR}/terrain.frag.glsl
+    ${SHADER_DIR}/lava.vert.glsl
+    ${SHADER_DIR}/lava.frag.glsl
+    ${SHADER_DIR}/contour.vert.glsl
+    ${SHADER_DIR}/contour.frag.glsl
+)
+
+set(SHADER_OUTPUTS)
+foreach(SHADER ${SHADER_SOURCES})
+    get_filename_component(SHADER_NAME ${SHADER} NAME)
+    set(SPV_FILE ${SHADER_OUT_DIR}/${SHADER_NAME}.spv)
+    # Extract stage from filename (e.g., terrain.vert.glsl -> vertex)
+    string(REGEX MATCH "\\.(vert|frag)\\." STAGE_MATCH ${SHADER_NAME})
+    string(REGEX REPLACE "\\." "" SHADER_STAGE ${STAGE_MATCH})
+    if(SHADER_STAGE STREQUAL "vert")
+        set(STAGE_FLAG "-fshader-stage=vertex")
+    else()
+        set(STAGE_FLAG "-fshader-stage=fragment")
+    endif()
+    add_custom_command(
+        OUTPUT ${SPV_FILE}
+        COMMAND ${GLSLC} ${STAGE_FLAG} -o ${SPV_FILE} ${SHADER}
+        DEPENDS ${SHADER}
+        COMMENT "Compiling shader ${SHADER_NAME}"
+    )
+    list(APPEND SHADER_OUTPUTS ${SPV_FILE})
+endforeach()
+
+add_custom_target(shaders DEPENDS ${SHADER_OUTPUTS})
+
 # ---- topo_engine (static library) ----
 add_library(topo_engine STATIC
     src/engine/app.cpp
@@ -80,6 +119,8 @@ add_executable(topogen
     src/game/terrain/delve_render.cpp
     src/game/terrain/terrain_generator.cpp
     src/game/terrain/map_gen.cpp
+    src/game/terrain/terrain_mesh.cpp
+    src/game/terrain/terrain_renderer.cpp
 )
 
 target_include_directories(topogen PRIVATE
@@ -87,7 +128,13 @@ target_include_directories(topogen PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/engine
 )
 
+target_compile_definitions(topogen PRIVATE
+    SHADER_DIR="${SHADER_OUT_DIR}"
+)
+
 target_link_libraries(topogen PRIVATE
     topo_engine
     nlohmann_json::nlohmann_json
 )
+
+add_dependencies(topogen shaders)
