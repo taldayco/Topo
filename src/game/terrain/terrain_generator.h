@@ -1,16 +1,13 @@
 #pragma once
 #include "terrain/contour.h"
+#include "terrain/map_data.h"
 #include <cstdint>
 #include <span>
 #include <vector>
 struct HexColumn;
 struct LavaBody;
 
-// Terrain map pixel values
-constexpr int16_t TERRAIN_EMPTY  =  0;
-constexpr int16_t TERRAIN_BASALT = -1;
-constexpr int16_t TERRAIN_LAVA  = -2;
-// Positive values (1..N) = plateau index + 1
+// Positive terrain_map values (1..N) = plateau index + 1
 
 class TerrainGenerator {
 public:

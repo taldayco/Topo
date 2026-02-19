@@ -110,6 +110,8 @@ add_executable(topogen
     src/game/scenes/game_scene.cpp
     src/game/scenes/pause_scene.cpp
     src/game/terrain/noise.cpp
+    src/game/terrain/noise_layers.cpp
+    src/game/terrain/noise_composer.cpp
     src/game/terrain/contour.cpp
     src/game/terrain/hex.cpp
     src/game/terrain/isometric.cpp

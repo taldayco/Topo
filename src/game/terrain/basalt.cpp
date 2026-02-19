@@ -1,4 +1,5 @@
 #include "terrain/basalt.h"
+#include "terrain/map_data.h"
 #include "terrain/palettes.h"
 #include "terrain/terrain_generator.h"
 #include "core/types.h"
@@ -147,6 +148,87 @@ generate_basalt_columns(std::span<const float> heightmap, int width, int height,
 
   SDL_Log("Generated %zu columns for %zu plateaus", columns.size(),
           plateaus_with_columns_out.size());
+
+  for (auto &col : columns) {
+    for (int i = 0; i < 6; ++i) {
+      col.visible_edges[i] = false;
+      col.edge_drops[i] = 0.0f;
+    }
+  }
+
+  compute_visible_edges(columns);
+  return columns;
+}
+
+std::vector<HexColumn>
+generate_basalt_columns_v2(MapData &data, float hex_size,
+                           const WorleyBasaltParams &params) {
+  int width = data.width;
+  int height = data.height;
+  std::vector<HexColumn> columns;
+
+  // Determine hex grid range covering entire map
+  HexCoord corner_tl = pixel_to_hex(0, 0, hex_size);
+  HexCoord corner_br = pixel_to_hex(width, height, hex_size);
+
+  int q_min = corner_tl.q - 2;
+  int q_max = corner_br.q + 2;
+  int r_min = corner_tl.r - 2;
+  int r_max = corner_br.r + 2;
+
+  for (int q = q_min; q <= q_max; ++q) {
+    for (int r = r_min; r <= r_max; ++r) {
+      float cx, cy;
+      hex_to_pixel(q, r, hex_size, cx, cy);
+
+      int px = (int)cx;
+      int py = (int)cy;
+      if (px < 0 || px >= width || py < 0 || py >= height)
+        continue;
+
+      int idx = py * width + px;
+
+      // Skip liquid pixels
+      if (data.liquid_mask[idx])
+        continue;
+
+      // Worley density gate: skip if worley value too low
+      if (data.worley[idx] < params.density_threshold)
+        continue;
+
+      float h = data.basalt_height[idx];
+
+      // Worley jitter for tiered stepping
+      h += data.worley[idx] * params.jitter_scale;
+
+      float base_h = data.basalt_height[idx];
+
+      columns.push_back({q, r, h, base_h});
+
+      // Mark pixels in terrain_map
+      Vec2 corners[6];
+      get_hex_corners(q, r, hex_size, corners);
+      float fmin_x = 1e9f, fmax_x = -1e9f, fmin_y = 1e9f, fmax_y = -1e9f;
+      for (int i = 0; i < 6; ++i) {
+        fmin_x = std::min(fmin_x, corners[i].x);
+        fmax_x = std::max(fmax_x, corners[i].x);
+        fmin_y = std::min(fmin_y, corners[i].y);
+        fmax_y = std::max(fmax_y, corners[i].y);
+      }
+      int x0 = std::max(0, (int)fmin_x - 1);
+      int x1 = std::min(width - 1, (int)fmax_x + 1);
+      int y0 = std::max(0, (int)fmin_y - 1);
+      int y1 = std::min(height - 1, (int)fmax_y + 1);
+      for (int ry = y0; ry <= y1; ++ry) {
+        for (int rx = x0; rx <= x1; ++rx) {
+          if (pixel_in_hex((float)rx, (float)ry, q, r, hex_size))
+            data.terrain_map[ry * width + rx] = TERRAIN_BASALT;
+        }
+      }
+    }
+  }
+
+  SDL_Log("generate_basalt_columns_v2: %zu columns", columns.size());
 
   for (auto &col : columns) {
     for (int i = 0; i < 6; ++i) {

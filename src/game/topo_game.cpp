@@ -2,8 +2,10 @@
 #include "scenes/game_scene.h"
 #include "scenes/menu_scene.h"
 #include "scenes/pause_scene.h"
+#include "terrain/basalt.h"
+#include "terrain/lava.h"
 #include "terrain/map_gen.h"
-#include "terrain/noise.h"
+#include "terrain/noise_composer.h"
 #include "terrain/contour.h"
 #include "terrain/palettes.h"
 #include "ui/imgui_ui.h"
@@ -65,14 +67,34 @@ void TopoGame::on_render_game(GpuContext &gpu, FrameContext &frame) {
     SDL_Log("Starting GPU regeneration...");
     auto start = SDL_GetTicks();
 
-    app_state.heightmap.resize(Config::MAP_WIDTH * Config::MAP_HEIGHT);
-    generate_heightmap(app_state.heightmap, Config::MAP_WIDTH,
-                       Config::MAP_HEIGHT, app_state.noise_params,
-                       app_state.map_scale);
+    int w = Config::MAP_WIDTH;
+    int h = Config::MAP_HEIGHT;
+
+    app_state.elev_params.map_scale = app_state.map_scale;
+
+    // Run the composition pipeline
+    app_state.map_data.allocate(w, h);
+    compose_layers(app_state.map_data, app_state.elev_params,
+                   app_state.river_params, app_state.worley_params,
+                   app_state.comp_params, &app_state.noise_cache);
+
+    // Generate Worley-driven basalt columns
+    app_state.map_data.columns =
+        generate_basalt_columns_v2(app_state.map_data, Config::HEX_SIZE);
+
+    // Generate lava from liquid mask
+    app_state.map_data.lava_bodies =
+        generate_lava_from_mask(app_state.map_data);
+
+    // Copy basalt_height to old heightmap for backward compat
+    int n = w * h;
+    app_state.heightmap.resize(n);
+    std::copy(app_state.map_data.basalt_height.begin(),
+              app_state.map_data.basalt_height.end(),
+              app_state.heightmap.begin());
 
     app_state.contour_lines.clear();
-    extract_contours(app_state.heightmap, Config::MAP_WIDTH,
-                     Config::MAP_HEIGHT, app_state.contour_interval,
+    extract_contours(app_state.heightmap, w, h, app_state.contour_interval,
                      app_state.contour_lines, app_state.band_map);
 
     terrain_mesh = build_terrain_mesh(app_state);
@@ -135,21 +157,51 @@ void TopoGame::render_ui(bool game_window_open) {
   }
 
   ImGui::Separator();
-  ImGui::Text("Noise Parameters");
+  ImGui::Text("Elevation");
   app_state.need_regenerate |= ImGui::SliderFloat(
-      "Frequency", &app_state.noise_params.frequency, 0.001f, 0.05f);
+      "Frequency", &app_state.elev_params.frequency, 0.001f, 0.05f);
   app_state.need_regenerate |=
-      ImGui::SliderInt("Octaves", &app_state.noise_params.octaves, 1, 8);
+      ImGui::SliderInt("Octaves", &app_state.elev_params.octaves, 1, 8);
   app_state.need_regenerate |= ImGui::SliderFloat(
-      "Lacunarity", &app_state.noise_params.lacunarity, 1.0f, 4.0f);
+      "Lacunarity", &app_state.elev_params.lacunarity, 1.0f, 4.0f);
   app_state.need_regenerate |=
-      ImGui::SliderFloat("Gain", &app_state.noise_params.gain, 0.1f, 1.0f);
+      ImGui::SliderFloat("Gain", &app_state.elev_params.gain, 0.1f, 1.0f);
   app_state.need_regenerate |=
-      ImGui::SliderInt("Seed", &app_state.noise_params.seed, 0, 10000);
+      ImGui::SliderInt("Seed", &app_state.elev_params.seed, 0, 10000);
   app_state.need_regenerate |= ImGui::SliderInt(
-      "Terrace Levels", &app_state.noise_params.terrace_levels, 3, 20);
+      "Terrace Levels", &app_state.comp_params.terrace_levels, 3, 20);
   app_state.need_regenerate |= ImGui::SliderInt(
-      "Min Region Size", &app_state.noise_params.min_region_size, 50, 2000);
+      "Min Region Size", &app_state.comp_params.min_region_size, 50, 2000);
+  app_state.need_regenerate |= ImGui::SliderFloat(
+      "S-Curve Bias", &app_state.elev_params.scurve_bias, 0.0f, 1.0f);
+
+  ImGui::Separator();
+  ImGui::Text("River Mask");
+  app_state.need_regenerate |= ImGui::SliderFloat(
+      "River Freq", &app_state.river_params.frequency, 0.001f, 0.05f);
+  app_state.need_regenerate |= ImGui::SliderInt(
+      "River Octaves", &app_state.river_params.octaves, 1, 8);
+  app_state.need_regenerate |= ImGui::SliderInt(
+      "River Seed", &app_state.river_params.seed, 0, 10000);
+  app_state.need_regenerate |= ImGui::SliderFloat(
+      "River Threshold", &app_state.river_params.threshold, 0.0f, 1.0f);
+
+  ImGui::Separator();
+  ImGui::Text("Worley Noise");
+  app_state.need_regenerate |= ImGui::SliderFloat(
+      "Worley Freq", &app_state.worley_params.frequency, 0.001f, 0.1f);
+  app_state.need_regenerate |= ImGui::SliderInt(
+      "Worley Seed", &app_state.worley_params.seed, 0, 10000);
+  app_state.need_regenerate |= ImGui::SliderFloat(
+      "Worley Jitter", &app_state.worley_params.jitter, 0.0f, 2.0f);
+
+  ImGui::Separator();
+  ImGui::Text("Composition");
+  app_state.need_regenerate |= ImGui::SliderFloat(
+      "River Elev Max", &app_state.comp_params.river_elevation_max, 0.0f, 1.0f);
+  app_state.need_regenerate |= ImGui::SliderFloat(
+      "Lava Threshold", &app_state.comp_params.lava_threshold, 0.0f, 1.0f);
+
   ImGui::Separator();
   ImGui::Text("Contour Lines");
   app_state.need_regenerate |=
@@ -195,12 +247,16 @@ void TopoGame::render_ui(bool game_window_open) {
   if (ImGui::Button("Regenerate", {-1, 40}))
     app_state.need_regenerate = true;
   if (ImGui::Button("Reset", {-1, 40})) {
-    app_state.noise_params = DEFAULT_NOISE;
+    app_state.elev_params = ElevationParams{};
+    app_state.river_params = RiverParams{};
+    app_state.worley_params = WorleyParams{};
+    app_state.comp_params = CompositionParams{};
     app_state.contour_interval = Config::DEFAULT_CONTOUR_INTERVAL;
     app_state.use_isometric = DEFAULT_ISOMETRIC;
     app_state.current_palette = 0;
     app_state.map_scale = Config::DEFAULT_MAP_SCALE;
     app_state.view = ViewState{};
+    app_state.noise_cache.invalidate_all();
     app_state.need_regenerate = true;
   }
 

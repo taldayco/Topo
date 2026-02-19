@@ -2,7 +2,11 @@
 #include "config.h"
 #include "terrain/contour.h"
 #include "terrain/detail.h"
+#include "terrain/map_data.h"
 #include "terrain/noise.h"
+#include "terrain/noise_cache.h"
+#include "terrain/noise_composer.h"
+#include "terrain/noise_layers.h"
 #include "core/types.h"
 #include <vector>
 
@@ -13,7 +17,19 @@ constexpr NoiseParams DEFAULT_NOISE = {
 constexpr bool DEFAULT_ISOMETRIC = true;
 
 struct AppState {
+  // Old params (kept temporarily for backward compat)
   NoiseParams noise_params = DEFAULT_NOISE;
+
+  // New per-layer params
+  ElevationParams elev_params;
+  RiverParams river_params;
+  WorleyParams worley_params;
+  CompositionParams comp_params;
+
+  // Shared terrain data
+  MapData map_data;
+  NoiseCache noise_cache;
+
   float contour_interval = Config::DEFAULT_CONTOUR_INTERVAL;
   bool use_isometric = DEFAULT_ISOMETRIC;
   int current_palette = 0;
@@ -27,6 +43,8 @@ struct AppState {
   bool need_regenerate = true;
   bool launch_game_requested = false;
   bool close_game_requested = false;
+
+  // Old data (kept temporarily, will be moved to MapData)
   std::vector<float> heightmap;
   std::vector<int> band_map;
   std::vector<Line> contour_lines;

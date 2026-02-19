@@ -7,6 +7,8 @@
 #include <unordered_set>
 #include <vector>
 
+struct MapData;
+
 struct ChannelRegion {
   std::vector<int> pixels;
   float min_x, max_x, min_y, max_y;
@@ -65,6 +67,8 @@ void generate_lava_mesh_masked(LavaBody &lava,
 
 float get_lava_height(float x, float y, float base_z, float time,
                        float time_offset);
+
+std::vector<LavaBody> generate_lava_from_mask(MapData &data);
 
 void render_lava(std::vector<uint32_t> &pixels, int view_width,
                   int view_height, const std::vector<LavaBody> &lava_bodies,

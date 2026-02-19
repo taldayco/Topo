@@ -4,6 +4,7 @@
 #include "terrain/basalt.h"
 #include "terrain/hex.h"
 #include "terrain/lava.h"
+#include "terrain/map_data.h"
 #include "terrain/palettes.h"
 #include "terrain/color.h"
 #include "core/types.h"
@@ -76,10 +77,25 @@ TerrainMesh build_terrain_mesh(const AppState &state) {
   mesh.iso_params.tile_height = Config::ISO_TILE_HEIGHT;
   mesh.iso_params.height_scale = Config::ISO_HEIGHT_SCALE;
 
-  auto terrain = TerrainGenerator::generate(
-      state.heightmap, state.band_map, Config::MAP_WIDTH, Config::MAP_HEIGHT);
+  // Use MapData columns if available, otherwise fall back to old generator
+  const std::vector<HexColumn> *columns_ptr;
+  const std::vector<LavaBody> *lava_ptr;
+  TerrainGenerator::TerrainData terrain_fallback;
 
-  if (terrain.columns.empty()) {
+  if (!state.map_data.columns.empty()) {
+    columns_ptr = &state.map_data.columns;
+    lava_ptr = &state.map_data.lava_bodies;
+  } else {
+    terrain_fallback = TerrainGenerator::generate(
+        state.heightmap, state.band_map, Config::MAP_WIDTH, Config::MAP_HEIGHT);
+    columns_ptr = &terrain_fallback.columns;
+    lava_ptr = &terrain_fallback.lava_bodies;
+  }
+
+  const auto &columns = *columns_ptr;
+  const auto &lava_bodies = *lava_ptr;
+
+  if (columns.empty()) {
     SDL_Log("TerrainMesh: No columns, empty mesh");
     return mesh;
   }
@@ -115,8 +131,8 @@ TerrainMesh build_terrain_mesh(const AppState &state) {
 
   // Sort columns back-to-front by (q+r) descending
   std::vector<const HexColumn *> sorted;
-  sorted.reserve(terrain.columns.size());
-  for (const auto &col : terrain.columns)
+  sorted.reserve(columns.size());
+  for (const auto &col : columns)
     sorted.push_back(&col);
   std::sort(sorted.begin(), sorted.end(),
             [](const HexColumn *a, const HexColumn *b) {
@@ -167,7 +183,7 @@ TerrainMesh build_terrain_mesh(const AppState &state) {
           mesh.basalt_indices.size() - mesh.side_index_count);
 
   // --- Lava vertices ---
-  for (const auto &lava : terrain.lava_bodies) {
+  for (const auto &lava : lava_bodies) {
     for (int idx : lava.pixels) {
       int px = idx % Config::MAP_WIDTH;
       int py = idx / Config::MAP_WIDTH;

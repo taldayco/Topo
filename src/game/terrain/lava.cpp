@@ -1,6 +1,7 @@
 #include "terrain/lava.h"
 #include "terrain/basalt.h"
 #include "terrain/color.h"
+#include "terrain/map_data.h"
 #include "config.h"
 #include "terrain/terrain_generator.h"
 #include "terrain/util.h"
@@ -634,4 +635,85 @@ void render_lava(std::vector<uint32_t> &pixels, int view_w, int view_h,
       }
     }
   }
+}
+
+std::vector<LavaBody> generate_lava_from_mask(MapData &data) {
+  int width = data.width;
+  int height = data.height;
+  int n = width * height;
+
+  // BFS connected components on liquid_mask
+  std::vector<bool> visited(n, false);
+  std::vector<LavaBody> bodies;
+
+  const int dirs[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+
+  for (int sy = 0; sy < height; ++sy) {
+    for (int sx = 0; sx < width; ++sx) {
+      int start = sy * width + sx;
+      if (visited[start] || !data.liquid_mask[start])
+        continue;
+
+      std::vector<int> component_pixels;
+      std::queue<int> q;
+      q.push(start);
+      visited[start] = true;
+
+      float sum_h = 0;
+      float mn_x = (float)sx, mx_x = (float)sx;
+      float mn_y = (float)sy, mx_y = (float)sy;
+
+      while (!q.empty()) {
+        int idx = q.front();
+        q.pop();
+        component_pixels.push_back(idx);
+        int cx = idx % width, cy = idx / width;
+        sum_h += data.final_elevation[idx];
+
+        mn_x = std::min(mn_x, (float)cx);
+        mx_x = std::max(mx_x, (float)cx);
+        mn_y = std::min(mn_y, (float)cy);
+        mx_y = std::max(mx_y, (float)cy);
+
+        for (auto [dx, dy] : dirs) {
+          int nx = cx + dx, ny = cy + dy;
+          if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+            int nidx = ny * width + nx;
+            if (!visited[nidx] && data.liquid_mask[nidx]) {
+              visited[nidx] = true;
+              q.push(nidx);
+            }
+          }
+        }
+      }
+
+      if (component_pixels.size() < 50)
+        continue;
+
+      float avg_h = sum_h / component_pixels.size();
+
+      LavaBody lava;
+      lava.plateau_index = -1;
+      lava.height = avg_h;
+      lava.min_x = mn_x;
+      lava.max_x = mx_x;
+      lava.min_y = mn_y;
+      lava.max_y = mx_y;
+      float bw = mx_x - mn_x + 1.f, bh = mx_y - mn_y + 1.f;
+      lava.aspect_ratio = std::max(bw, bh) / std::max(1.0f, std::min(bw, bh));
+      lava.pixels = std::move(component_pixels);
+      lava.time_offset =
+          (hash1d((int)bodies.size()) % 1000) / 1000.0f * 6.283185f;
+
+      // Mark in terrain_map
+      for (int idx : lava.pixels) {
+        data.terrain_map[idx] = TERRAIN_LAVA;
+      }
+
+      bodies.push_back(std::move(lava));
+    }
+  }
+
+  SDL_Log("generate_lava_from_mask: %zu lava bodies", bodies.size());
+  return bodies;
 }
