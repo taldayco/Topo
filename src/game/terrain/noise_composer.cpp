@@ -96,7 +96,7 @@ void compose_layers(MapData &data, const ElevationParams &elev,
   WorleyParams worley_scaled = worley;
   worley_scaled.map_scale = elev.map_scale;
 
-  // 1. Generate noise layers with cache support
+  // Generate noise layers with cache support
   uint64_t elev_hash = cache ? NoiseCache::hash_params(elev) : 0;
   uint64_t river_hash = cache ? NoiseCache::hash_params(river_scaled) : 0;
   uint64_t worley_hash = cache ? NoiseCache::hash_params(worley_scaled) : 0;
@@ -110,8 +110,7 @@ void compose_layers(MapData &data, const ElevationParams &elev,
     SDL_Log("  Elevation: cache hit");
   }
 
-  if (!cache ||
-      !cache->get(NoiseCache::RIVER, river_hash, data.river_mask)) {
+  if (!cache || !cache->get(NoiseCache::RIVER, river_hash, data.river_mask)) {
     generate_river_mask(data.river_mask, w, h, river_scaled);
     if (cache)
       cache->put(NoiseCache::RIVER, river_hash, data.river_mask);
@@ -121,20 +120,20 @@ void compose_layers(MapData &data, const ElevationParams &elev,
   }
 
   if (!cache || !cache->get2(NoiseCache::WORLEY, worley_hash, data.worley,
-                              data.worley_edge)) {
+                             data.worley_edge)) {
     generate_worley_layer(data.worley, data.worley_edge, w, h, worley_scaled);
     if (cache)
       cache->put2(NoiseCache::WORLEY, worley_hash, data.worley,
-                   data.worley_edge);
+                  data.worley_edge);
     SDL_Log("  Worley: generated");
   } else {
     SDL_Log("  Worley: cache hit");
   }
 
-  // 2. Copy elevation to final_elevation (smooth, unquantized)
+  // Copy elevation to final_elevation (smooth, unquantized)
   data.final_elevation = data.elevation;
 
-  // 3. Build liquid_mask
+  // Build liquid_mask
   for (int i = 0; i < n; ++i) {
     bool is_river = (data.river_mask[i] > river.threshold) &&
                     (data.elevation[i] < comp.river_elevation_max);
@@ -142,7 +141,7 @@ void compose_layers(MapData &data, const ElevationParams &elev,
     data.liquid_mask[i] = (is_river || is_low) ? 1 : 0;
   }
 
-  // 4. Selective quantization: only non-liquid pixels get terraced
+  // Selective quantization: only non-liquid pixels get terraced
   for (int i = 0; i < n; ++i) {
     if (data.liquid_mask[i]) {
       data.basalt_height[i] = data.final_elevation[i];
@@ -153,7 +152,7 @@ void compose_layers(MapData &data, const ElevationParams &elev,
     }
   }
 
-  // 5. Small region cleanup on basalt_height
+  // Small region cleanup on basalt_height
   cleanup_small_regions(data.basalt_height, w, h, comp.min_region_size);
 
   SDL_Log("Layer composition: %llu ms", SDL_GetTicks() - start);
