@@ -11,6 +11,29 @@
 #include <unordered_map>
 #include <vector>
 
+// Bilinear interpolation sample from a float map
+static float sample_bilinear(const std::vector<float> &map, int width,
+                             int height, float fx, float fy) {
+  float x = std::max(0.0f, std::min(fx, (float)(width - 1)));
+  float y = std::max(0.0f, std::min(fy, (float)(height - 1)));
+
+  int x0 = (int)x;
+  int y0 = (int)y;
+  int x1 = std::min(x0 + 1, width - 1);
+  int y1 = std::min(y0 + 1, height - 1);
+
+  float tx = x - x0;
+  float ty = y - y0;
+
+  float v00 = map[y0 * width + x0];
+  float v10 = map[y0 * width + x1];
+  float v01 = map[y1 * width + x0];
+  float v11 = map[y1 * width + x1];
+
+  return v00 * (1 - tx) * (1 - ty) + v10 * tx * (1 - ty) +
+         v01 * (1 - tx) * ty + v11 * tx * ty;
+}
+
 static bool hex_fits_in_plateau(int q, int r, float hex_size,
                                 std::span<const int16_t> terrain_map,
                                 int16_t plateau_id,
@@ -167,41 +190,53 @@ generate_basalt_columns_v2(MapData &data, float hex_size,
   int height = data.height;
   std::vector<HexColumn> columns;
 
-  // Determine hex grid range covering entire map
-  HexCoord corner_tl = pixel_to_hex(0, 0, hex_size);
-  HexCoord corner_br = pixel_to_hex(width, height, hex_size);
+  // Determine hex grid range covering entire map.
+  // The hex coordinate system is sheared, so we must check all four pixel
+  // corners to get the correct q,r bounding range.
+  HexCoord c0 = pixel_to_hex(0, 0, hex_size);
+  HexCoord c1 = pixel_to_hex(width, 0, hex_size);
+  HexCoord c2 = pixel_to_hex(0, height, hex_size);
+  HexCoord c3 = pixel_to_hex(width, height, hex_size);
 
-  int q_min = corner_tl.q - 2;
-  int q_max = corner_br.q + 2;
-  int r_min = corner_tl.r - 2;
-  int r_max = corner_br.r + 2;
+  int q_min = std::min({c0.q, c1.q, c2.q, c3.q}) - 2;
+  int q_max = std::max({c0.q, c1.q, c2.q, c3.q}) + 2;
+  int r_min = std::min({c0.r, c1.r, c2.r, c3.r}) - 2;
+  int r_max = std::max({c0.r, c1.r, c2.r, c3.r}) + 2;
 
   for (int q = q_min; q <= q_max; ++q) {
     for (int r = r_min; r <= r_max; ++r) {
       float cx, cy;
       hex_to_pixel(q, r, hex_size, cx, cy);
 
+      // Small hash-based jitter for local variation
+      uint32_t hv = hash2d(q, r);
+      float jx = ((hv & 0xFF) / 255.0f - 0.5f) * hex_size * 0.3f;
+      float jy = (((hv >> 8) & 0xFF) / 255.0f - 0.5f) * hex_size * 0.3f;
+      float sx = cx + jx;
+      float sy = cy + jy;
+
+      if (sx < 0 || sx >= width - 1 || sy < 0 || sy >= height - 1)
+        continue;
+
       int px = (int)cx;
       int py = (int)cy;
       if (px < 0 || px >= width || py < 0 || py >= height)
         continue;
 
-      int idx = py * width + px;
-
-      // Skip liquid pixels
-      if (data.liquid_mask[idx])
+      // Skip liquid pixels (use nearest for boolean mask)
+      if (data.liquid_mask[py * width + px])
         continue;
 
-      // Worley density gate: skip if worley value too low
-      if (data.worley[idx] < params.density_threshold)
+      // Worley density gate: bilinear sample at jittered position
+      float worley_val = sample_bilinear(data.worley, width, height, sx, sy);
+      if (worley_val < params.density_threshold)
         continue;
 
-      float h = data.basalt_height[idx];
+      float base_h = sample_bilinear(data.basalt_height, width, height, sx, sy);
+      float h = base_h;
 
       // Worley jitter for tiered stepping
-      h += data.worley[idx] * params.jitter_scale;
-
-      float base_h = data.basalt_height[idx];
+      h += worley_val * params.jitter_scale;
 
       columns.push_back({q, r, h, base_h});
 

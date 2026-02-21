@@ -4,7 +4,9 @@
 #include <cstdint>
 #include <vector>
 
-struct AppState;
+struct TerrainState;
+struct MapData;
+struct ContourData;
 
 struct BasaltVertex {
   float pos_x, pos_y;
@@ -42,7 +44,8 @@ struct TerrainMesh {
   IsometricParams iso_params;
 };
 
-TerrainMesh build_terrain_mesh(const AppState &state);
+TerrainMesh build_terrain_mesh(const TerrainState &terrain, const MapData &map_data,
+                               const ContourData &contours);
 
 SceneUniforms compute_uniforms(const TerrainMesh &mesh, const struct ViewState &view,
                                uint32_t viewport_w, uint32_t viewport_h,

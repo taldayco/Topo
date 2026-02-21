@@ -1,5 +1,5 @@
 #include "terrain/terrain_mesh.h"
-#include "app_state.h"
+#include "game_state.h"
 #include "config.h"
 #include "terrain/basalt.h"
 #include "terrain/hex.h"
@@ -70,30 +70,16 @@ static void add_side_face(TerrainMesh &mesh, const Vec2 &corner0,
   mesh.basalt_indices.push_back(base + 3);
 }
 
-TerrainMesh build_terrain_mesh(const AppState &state) {
+TerrainMesh build_terrain_mesh(const TerrainState &terrain, const MapData &map_data,
+                               const ContourData &contours) {
   TerrainMesh mesh;
 
   mesh.iso_params.tile_width = Config::ISO_TILE_WIDTH;
   mesh.iso_params.tile_height = Config::ISO_TILE_HEIGHT;
   mesh.iso_params.height_scale = Config::ISO_HEIGHT_SCALE;
 
-  // Use MapData columns if available, otherwise fall back to old generator
-  const std::vector<HexColumn> *columns_ptr;
-  const std::vector<LavaBody> *lava_ptr;
-  TerrainGenerator::TerrainData terrain_fallback;
-
-  if (!state.map_data.columns.empty()) {
-    columns_ptr = &state.map_data.columns;
-    lava_ptr = &state.map_data.lava_bodies;
-  } else {
-    terrain_fallback = TerrainGenerator::generate(
-        state.heightmap, state.band_map, Config::MAP_WIDTH, Config::MAP_HEIGHT);
-    columns_ptr = &terrain_fallback.columns;
-    lava_ptr = &terrain_fallback.lava_bodies;
-  }
-
-  const auto &columns = *columns_ptr;
-  const auto &lava_bodies = *lava_ptr;
+  const auto &columns = map_data.columns;
+  const auto &lava_bodies = map_data.lava_bodies;
 
   if (columns.empty()) {
     SDL_Log("TerrainMesh: No columns, empty mesh");
@@ -121,13 +107,13 @@ TerrainMesh build_terrain_mesh(const AppState &state) {
     }
   }
 
-  float padding = state.iso_padding;
-  mesh.iso_offset_x = -min_x + padding + state.iso_offset_x_adjust;
-  mesh.iso_offset_y = -min_y + padding + state.iso_offset_y_adjust;
+  float padding = terrain.iso_padding;
+  mesh.iso_offset_x = -min_x + padding + terrain.iso_offset_x_adjust;
+  mesh.iso_offset_y = -min_y + padding + terrain.iso_offset_y_adjust;
   mesh.scene_width = (max_x - min_x) + padding * 2;
   mesh.scene_height = (max_y - min_y) + padding * 2;
 
-  const Palette &palette = PALETTES[state.current_palette];
+  const Palette &palette = PALETTES[terrain.current_palette];
 
   // Sort columns back-to-front by (q+r) descending
   std::vector<const HexColumn *> sorted;
@@ -200,7 +186,7 @@ TerrainMesh build_terrain_mesh(const AppState &state) {
   SDL_Log("TerrainMesh: %zu lava vertices", mesh.lava_vertices.size());
 
   // --- Contour lines ---
-  for (const auto &line : state.contour_lines) {
+  for (const auto &line : contours.contour_lines) {
     float iso_x0, iso_y0, iso_x1, iso_y1;
     world_to_iso(line.x1, line.y1, line.elevation, iso_x0, iso_y0,
                  mesh.iso_params);
@@ -213,7 +199,7 @@ TerrainMesh build_terrain_mesh(const AppState &state) {
   }
 
   SDL_Log("TerrainMesh: %zu contour vertices (%zu lines)",
-          mesh.contour_vertices.size(), state.contour_lines.size());
+          mesh.contour_vertices.size(), contours.contour_lines.size());
 
   return mesh;
 }

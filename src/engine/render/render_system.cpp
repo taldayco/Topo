@@ -15,7 +15,7 @@ static uint32_t alpha_blend_rs(uint32_t src, uint32_t dst, float alpha) {
   return 0xFF000000 | (r << 16) | (g << 8) | b;
 }
 
-void RenderSystem::render_entities(entt::registry &registry,
+void RenderSystem::render_entities(flecs::world &world,
                                    std::vector<uint32_t> &pixels,
                                    int view_width, int view_height,
                                    float offset_x, float offset_y,
@@ -25,8 +25,8 @@ void RenderSystem::render_entities(entt::registry &registry,
                                    WorldToIsoFn world_to_iso_fn) {
   sorted_entities.clear();
 
-  auto view = registry.view<PositionComponent, SpriteComponent>();
-  for (auto [entity, pos, sprite] : view.each()) {
+  auto q = world.query<PositionComponent, SpriteComponent>();
+  q.each([&](flecs::entity entity, PositionComponent &pos, SpriteComponent &sprite) {
     float iso_x, iso_y;
     world_to_iso_fn(pos.x, pos.y, pos.z, iso_x, iso_y, params);
     iso_x += offset_x;
@@ -35,7 +35,7 @@ void RenderSystem::render_entities(entt::registry &registry,
     float depth = pos.x + pos.y;
 
     sorted_entities.push_back({iso_x, iso_y, depth, entity});
-  }
+  });
 
   std::sort(sorted_entities.begin(), sorted_entities.end(),
             [](const RenderableEntity &a, const RenderableEntity &b) {
@@ -43,19 +43,20 @@ void RenderSystem::render_entities(entt::registry &registry,
             });
 
   for (auto &re : sorted_entities) {
-    auto &sprite = registry.get<SpriteComponent>(re.entity);
-    const SpriteSheet *sheet = sprites.get_sheet(sprite.sheet_id);
+    const auto *sprite = re.entity.get<SpriteComponent>();
+    if (!sprite) continue;
+    const SpriteSheet *sheet = sprites.get_sheet(sprite->sheet_id);
     if (!sheet || sheet->frames.empty())
       continue;
 
-    int frame_idx = sprite.current_frame % (int)sheet->frames.size();
+    int frame_idx = sprite->current_frame % (int)sheet->frames.size();
     const SpriteFrame &frame = sheet->frames[frame_idx];
 
     int dst_x = (int)re.iso_x - frame.w / 2;
     int dst_y = (int)re.iso_y - frame.h;
 
     blit_sprite(pixels, view_width, view_height, *sheet, frame,
-                dst_x, dst_y, sprite.flip_x);
+                dst_x, dst_y, sprite->flip_x);
   }
 }
 

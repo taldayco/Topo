@@ -18,16 +18,16 @@ find_package(SDL3 REQUIRED)
 
 include(FetchContent)
 
-FetchContent_Declare(EnTT
-    GIT_REPOSITORY https://github.com/skypjack/entt
-    GIT_TAG v3.14.0
+FetchContent_Declare(flecs
+    GIT_REPOSITORY https://github.com/SanderMertens/flecs
+    GIT_TAG v4.0.5
 )
 FetchContent_Declare(json
     GIT_REPOSITORY https://github.com/nlohmann/json
     GIT_TAG v3.11.3
 )
 
-FetchContent_MakeAvailable(EnTT json)
+FetchContent_MakeAvailable(flecs json)
 
 # ImGui
 set(IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui)
@@ -99,16 +99,13 @@ target_include_directories(topo_engine PUBLIC
 target_link_libraries(topo_engine PUBLIC
     SDL3::SDL3
     imgui
-    EnTT::EnTT
+    flecs::flecs_static
 )
 
 # ---- topogen (executable) ----
 add_executable(topogen
     src/game/main.cpp
     src/game/topo_game.cpp
-    src/game/scenes/menu_scene.cpp
-    src/game/scenes/game_scene.cpp
-    src/game/scenes/pause_scene.cpp
     src/game/terrain/noise.cpp
     src/game/terrain/noise_layers.cpp
     src/game/terrain/noise_composer.cpp

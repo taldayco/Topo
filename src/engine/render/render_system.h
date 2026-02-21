@@ -1,7 +1,7 @@
 #pragma once
 #include "camera/camera.h"
 #include "render/sprite.h"
-#include <entt/entt.hpp>
+#include <flecs.h>
 #include <vector>
 
 struct IsometricParams;
@@ -9,7 +9,7 @@ struct IsometricParams;
 struct RenderableEntity {
   float iso_x, iso_y;
   float depth;
-  entt::entity entity;
+  flecs::entity entity;
 };
 
 class RenderSystem {
@@ -18,7 +18,7 @@ public:
                                 float &out_x, float &out_y,
                                 const IsometricParams &params);
 
-  void render_entities(entt::registry &registry,
+  void render_entities(flecs::world &world,
                        std::vector<uint32_t> &pixels,
                        int view_width, int view_height,
                        float offset_x, float offset_y,

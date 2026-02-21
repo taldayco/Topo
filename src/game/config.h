@@ -25,13 +25,12 @@ struct Config {
   static constexpr float LAVA_GRID_SPACING = 10.0f;
   static constexpr float HEIGHT_THRESHOLD = 0.02f;
   static constexpr int MIN_PLATEAU_SIZE = 50;
-  static constexpr float DEFAULT_CONTOUR_INTERVAL = 0.05f;
   static constexpr float DEFAULT_ISO_PADDING = 50.0f;
 
   // Noise parameters
   static constexpr float DEFAULT_NOISE_SCALE = 0.003f;
-  static constexpr int DEFAULT_NOISE_OCTAVES = 6;
-  static constexpr float DEFAULT_NOISE_LACUNARITY = 2.0f;
+  static constexpr int DEFAULT_NOISE_OCTAVES = 4;
+  static constexpr float DEFAULT_NOISE_LACUNARITY = 1.752f;
   static constexpr float DEFAULT_NOISE_GAIN = 0.5f;
   static constexpr int DEFAULT_NOISE_SEED = 1337;
   static constexpr int DEFAULT_NOISE_LEVELS = 8;

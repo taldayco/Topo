@@ -179,8 +179,10 @@ void generate_worley_layer(std::vector<float> &out_value,
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; ++x) {
       int idx = y * width + x;
-      float d = noise_dist.GetNoise((float)x * params.map_scale + ox, (float)y * params.map_scale + oy);
-      float e = noise_edge.GetNoise((float)x * params.map_scale + ox, (float)y * params.map_scale + oy);
+      float wx = (float)x * params.map_scale + ox;
+      float wy = (float)y * params.map_scale + oy;
+      float d = noise_dist.GetNoise(wx, wy);
+      float e = noise_edge.GetNoise(wx, wy);
       out_value[idx] = d;
       out_edge[idx] = e;
       min_d = std::min(min_d, d);

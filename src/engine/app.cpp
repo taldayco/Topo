@@ -11,7 +11,7 @@ int Application::run() {
 
   ui_init(gpu_ctx.window, gpu_ctx.device);
 
-  on_init(gpu_ctx);
+  on_init(gpu_ctx, ecs_world);
 
   SDL_Log("Entering main loop");
   uint64_t freq = SDL_GetPerformanceFrequency();
@@ -45,27 +45,27 @@ int Application::run() {
         }
       }
 
-      on_event(event);
+      on_event(event, ecs_world);
     }
 
     // Handle game window requests
-    if (wants_game_window_open()) {
+    if (wants_game_window_open(ecs_world)) {
       gpu_create_game_window(gpu_ctx);
     }
-    if (wants_game_window_close()) {
+    if (wants_game_window_close(ecs_world)) {
       gpu_destroy_game_window(gpu_ctx);
     }
 
-    // Fixed timestep update
+    // Fixed timestep update via Flecs
     while (accumulator >= FIXED_DT) {
-      on_update(FIXED_DT);
+      ecs_world.progress(FIXED_DT);
       accumulator -= FIXED_DT;
     }
 
     // Render tool window (ImGui)
     FrameContext tool_frame;
     if (gpu_acquire_frame(gpu_ctx, tool_frame)) {
-      on_render_tool(gpu_ctx, tool_frame);
+      on_render_tool(gpu_ctx, tool_frame, ecs_world);
       gpu_end_frame(tool_frame);
     }
 
@@ -73,13 +73,13 @@ int Application::run() {
     if (gpu_ctx.game_window) {
       FrameContext game_frame;
       if (gpu_acquire_game_frame(gpu_ctx, game_frame)) {
-        on_render_game(gpu_ctx, game_frame);
+        on_render_game(gpu_ctx, game_frame, ecs_world);
         gpu_end_frame(game_frame);
       }
     }
   }
 
-  on_cleanup();
+  on_cleanup(ecs_world);
   ui_shutdown();
   gpu_cleanup(gpu_ctx);
   return 0;
