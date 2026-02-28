@@ -1,0 +1,885 @@
+#include "terrain/terrain_renderer.h"
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_gpu.h>
+#include <cstring>
+#include <string>
+#include <vector>
+#include <cmath>
+#include <glm/glm.hpp>
+#include <glm/gtc/type_ptr.hpp>
+
+
+
+
+
+static std::vector<uint8_t> load_shader_file(const char *path) {
+  SDL_IOStream *io = SDL_IOFromFile(path, "rb");
+  if (!io) {
+    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to open shader: %s", path);
+    return {};
+  }
+  Sint64 size = SDL_GetIOSize(io);
+  if (size <= 0) { SDL_CloseIO(io); return {}; }
+  std::vector<uint8_t> data(size);
+  SDL_ReadIO(io, data.data(), size);
+  SDL_CloseIO(io);
+  return data;
+}
+
+static SDL_GPUShader *create_shader(SDL_GPUDevice *device, const char *path,
+                                    SDL_GPUShaderStage stage,
+                                    int num_uniform_buffers,
+                                    int num_storage_buffers = 0) {
+  auto code = load_shader_file(path);
+  if (code.empty()) return nullptr;
+
+  SDL_GPUShaderCreateInfo info = {};
+  info.code                = code.data();
+  info.code_size           = code.size();
+  info.entrypoint          = "main";
+  info.format              = SDL_GPU_SHADERFORMAT_SPIRV;
+  info.stage               = stage;
+  info.num_uniform_buffers = (Uint32)num_uniform_buffers;
+  info.num_storage_buffers = (Uint32)num_storage_buffers;
+
+  SDL_GPUShader *shader = SDL_CreateGPUShader(device, &info);
+  if (!shader)
+    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                 "Failed to create shader from %s: %s", path, SDL_GetError());
+  return shader;
+}
+
+static SDL_GPUComputePipeline *create_compute_pipeline(SDL_GPUDevice *device,
+                                                        const char *path,
+                                                        int num_uniform_buffers,
+                                                        int num_rw_storage_buffers,
+                                                        int num_ro_storage_buffers = 0) {
+  SDL_Log("create_compute_pipeline: Loading %s", path);
+  auto code = load_shader_file(path);
+  if (code.empty()) {
+    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "create_compute_pipeline: Failed to load %s", path);
+    return nullptr;
+  }
+
+  SDL_Log("create_compute_pipeline: %s loaded, size=%zu", path, code.size());
+
+  SDL_GPUComputePipelineCreateInfo info = {};
+  info.code                       = code.data();
+  info.code_size                  = code.size();
+  info.entrypoint                 = "main";
+  info.format                     = SDL_GPU_SHADERFORMAT_SPIRV;
+  info.num_uniform_buffers        = (Uint32)num_uniform_buffers;
+  info.num_readwrite_storage_buffers = (Uint32)num_rw_storage_buffers;
+  info.num_readonly_storage_buffers  = (Uint32)num_ro_storage_buffers;
+  info.threadcount_x              = 16;
+  info.threadcount_y              = 9;
+  info.threadcount_z              = 1;
+
+  SDL_Log("create_compute_pipeline: Calling SDL_CreateGPUComputePipeline for %s", path);
+  SDL_GPUComputePipeline *pipeline = SDL_CreateGPUComputePipeline(device, &info);
+  if (!pipeline)
+    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                 "Failed to create compute pipeline from %s: %s", path, SDL_GetError());
+
+  SDL_Log("create_compute_pipeline: Success for %s", path);
+  return pipeline;
+}
+
+static SDL_GPUBuffer *create_gpu_buffer(SDL_GPUDevice *device, uint32_t size,
+                                         SDL_GPUBufferUsageFlags usage) {
+  SDL_GPUBufferCreateInfo info = {};
+  info.usage = usage;
+  info.size  = size;
+  SDL_GPUBuffer *buf = SDL_CreateGPUBuffer(device, &info);
+  if (!buf)
+    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                 "Failed to create GPU buffer (size=%u): %s", size, SDL_GetError());
+  return buf;
+}
+
+static SDL_GPUBuffer *upload_to_gpu_buffer(SDL_GPUDevice *device,
+                                            const void *data, uint32_t size,
+                                            SDL_GPUBufferUsageFlags usage) {
+  SDL_GPUBuffer *buffer = create_gpu_buffer(device, size, usage);
+  if (!buffer) return nullptr;
+
+  SDL_GPUTransferBufferCreateInfo ti = {};
+  ti.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+  ti.size  = size;
+  SDL_GPUTransferBuffer *transfer = SDL_CreateGPUTransferBuffer(device, &ti);
+  if (!transfer) { SDL_ReleaseGPUBuffer(device, buffer); return nullptr; }
+
+  void *mapped = SDL_MapGPUTransferBuffer(device, transfer, false);
+  if (!mapped) {
+    SDL_ReleaseGPUTransferBuffer(device, transfer);
+    SDL_ReleaseGPUBuffer(device, buffer);
+    return nullptr;
+  }
+  SDL_memcpy(mapped, data, size);
+  SDL_UnmapGPUTransferBuffer(device, transfer);
+
+  SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(device);
+  SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(cmd);
+  SDL_GPUTransferBufferLocation src = { transfer, 0 };
+  SDL_GPUBufferRegion           dst = { buffer,   0, size };
+  SDL_UploadToGPUBuffer(copy, &src, &dst, false);
+  SDL_EndGPUCopyPass(copy);
+  SDL_SubmitGPUCommandBuffer(cmd);
+  SDL_WaitForGPUIdle(device);
+  SDL_ReleaseGPUTransferBuffer(device, transfer);
+  return buffer;
+}
+
+
+static SDL_GPUBuffer *create_zeroed_gpu_buffer(SDL_GPUDevice *device, uint32_t size,
+                                                SDL_GPUBufferUsageFlags usage) {
+  std::vector<uint8_t> zeros(size, 0);
+  return upload_to_gpu_buffer(device, zeros.data(), size, usage);
+}
+
+
+
+
+void TerrainRenderer::init(SDL_GPUDevice *device, SDL_Window *window) {
+  if (initialized) return;
+  if (!device) {
+    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainRenderer::init called with NULL device!");
+    return;
+  }
+  gpu_device = device;
+
+  if (SDL_GPUTextureSupportsFormat(device,
+          SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT,
+          SDL_GPU_TEXTURETYPE_2D,
+          SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET)) {
+    depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT;
+  } else {
+    depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT;
+  }
+
+  init_graphics_pipelines(device, window);
+  init_compute_pipelines(device);
+
+  initialized = true;
+  SDL_Log("TerrainRenderer: Initialized (graphics + compute pipelines)");
+}
+
+
+
+
+void TerrainRenderer::init_graphics_pipelines(SDL_GPUDevice *device, SDL_Window *window) {
+  std::string shader_dir = SHADER_DIR;
+  SDL_GPUTextureFormat swapchain_format =
+      SDL_GetGPUSwapchainTextureFormat(device, window);
+
+
+  {
+
+    SDL_GPUShader *vert = create_shader(
+        device, (shader_dir + "/terrain.vert.glsl.spv").c_str(),
+        SDL_GPU_SHADERSTAGE_VERTEX, 1, 0);
+    SDL_GPUShader *frag = create_shader(
+        device, (shader_dir + "/terrain.frag.glsl.spv").c_str(),
+        SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+
+    if (!vert || !frag) {
+      if (vert) SDL_ReleaseGPUShader(device, vert);
+      if (frag) SDL_ReleaseGPUShader(device, frag);
+      return;
+    }
+
+    SDL_GPUVertexBufferDescription vbuf_desc = {};
+    vbuf_desc.slot       = 0;
+    vbuf_desc.pitch      = sizeof(BasaltVertex);
+    vbuf_desc.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+
+    SDL_GPUVertexAttribute attrs[4] = {};
+    attrs[0] = { 0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, (Uint32)offsetof(BasaltVertex, pos_x)   };
+    attrs[1] = { 1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, (Uint32)offsetof(BasaltVertex, color_r) };
+    attrs[2] = { 2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT,  (Uint32)offsetof(BasaltVertex, sheen)   };
+    attrs[3] = { 3, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, (Uint32)offsetof(BasaltVertex, nx)      };
+
+    SDL_GPUColorTargetDescription color_desc = {};
+    color_desc.format = swapchain_format;
+
+    SDL_GPUGraphicsPipelineCreateInfo pi = {};
+    pi.vertex_shader   = vert;
+    pi.fragment_shader = frag;
+    pi.vertex_input_state.vertex_buffer_descriptions = &vbuf_desc;
+    pi.vertex_input_state.num_vertex_buffers         = 1;
+    pi.vertex_input_state.vertex_attributes          = attrs;
+    pi.vertex_input_state.num_vertex_attributes      = 4;
+    pi.primitive_type  = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    pi.target_info.color_target_descriptions         = &color_desc;
+    pi.target_info.num_color_targets                 = 1;
+    pi.target_info.has_depth_stencil_target          = true;
+    pi.target_info.depth_stencil_format              = depth_stencil_format;
+    pi.depth_stencil_state.compare_op                = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+    pi.depth_stencil_state.enable_depth_test         = true;
+    pi.depth_stencil_state.enable_depth_write        = true;
+
+    terrain_pipeline = SDL_CreateGPUGraphicsPipeline(device, &pi);
+    terrain_stencil_pipeline = nullptr;
+
+    SDL_ReleaseGPUShader(device, vert);
+    SDL_ReleaseGPUShader(device, frag);
+  }
+
+
+  {
+    SDL_GPUShader *vert = create_shader(
+        device, (shader_dir + "/lava.vert.glsl.spv").c_str(),
+        SDL_GPU_SHADERSTAGE_VERTEX, 1, 0);
+    SDL_GPUShader *frag = create_shader(
+        device, (shader_dir + "/lava.frag.glsl.spv").c_str(),
+        SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
+
+    if (vert && frag) {
+      SDL_GPUVertexBufferDescription vbuf_desc = {};
+      vbuf_desc.slot       = 0;
+      vbuf_desc.pitch      = sizeof(GpuLavaVertex);
+      vbuf_desc.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+
+      SDL_GPUVertexAttribute attrs[2] = {};
+      attrs[0] = { 0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, (Uint32)offsetof(GpuLavaVertex, pos_x)       };
+      attrs[1] = { 1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT,  (Uint32)offsetof(GpuLavaVertex, time_offset) };
+
+      SDL_GPUColorTargetDescription color_desc = {};
+      color_desc.format = swapchain_format;
+
+      SDL_GPUGraphicsPipelineCreateInfo pi = {};
+      pi.vertex_shader   = vert;
+      pi.fragment_shader = frag;
+      pi.vertex_input_state.vertex_buffer_descriptions = &vbuf_desc;
+      pi.vertex_input_state.num_vertex_buffers         = 1;
+      pi.vertex_input_state.vertex_attributes          = attrs;
+      pi.vertex_input_state.num_vertex_attributes      = 2;
+      pi.primitive_type  = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+      pi.target_info.color_target_descriptions         = &color_desc;
+      pi.target_info.num_color_targets                 = 1;
+      pi.target_info.has_depth_stencil_target          = true;
+      pi.target_info.depth_stencil_format              = depth_stencil_format;
+      pi.depth_stencil_state.compare_op                = SDL_GPU_COMPAREOP_LESS;
+      pi.depth_stencil_state.enable_depth_test         = true;
+      pi.depth_stencil_state.enable_depth_write        = true;
+      pi.depth_stencil_state.enable_stencil_test       = false;
+
+      lava_pipeline = SDL_CreateGPUGraphicsPipeline(device, &pi);
+    }
+    if (vert) SDL_ReleaseGPUShader(device, vert);
+    if (frag) SDL_ReleaseGPUShader(device, frag);
+  }
+
+
+  {
+    SDL_GPUShader *vert = create_shader(
+        device, (shader_dir + "/contour.vert.glsl.spv").c_str(),
+        SDL_GPU_SHADERSTAGE_VERTEX, 1, 0);
+    SDL_GPUShader *frag = create_shader(
+        device, (shader_dir + "/contour.frag.glsl.spv").c_str(),
+        SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
+
+    if (vert && frag) {
+      SDL_GPUVertexBufferDescription vbuf_desc = {};
+      vbuf_desc.slot       = 0;
+      vbuf_desc.pitch      = sizeof(ContourVertex);
+      vbuf_desc.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+
+      SDL_GPUVertexAttribute attrs[1] = {};
+      attrs[0] = { 0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, 0 };
+
+      SDL_GPUColorTargetDescription color_desc = {};
+      color_desc.format = swapchain_format;
+      color_desc.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+      color_desc.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+      color_desc.blend_state.color_blend_op        = SDL_GPU_BLENDOP_ADD;
+      color_desc.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+      color_desc.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+      color_desc.blend_state.alpha_blend_op        = SDL_GPU_BLENDOP_ADD;
+      color_desc.blend_state.enable_blend          = true;
+
+      SDL_GPUGraphicsPipelineCreateInfo pi = {};
+      pi.vertex_shader   = vert;
+      pi.fragment_shader = frag;
+      pi.vertex_input_state.vertex_buffer_descriptions = &vbuf_desc;
+      pi.vertex_input_state.num_vertex_buffers         = 1;
+      pi.vertex_input_state.vertex_attributes          = attrs;
+      pi.vertex_input_state.num_vertex_attributes      = 1;
+      pi.primitive_type  = SDL_GPU_PRIMITIVETYPE_LINELIST;
+      pi.target_info.color_target_descriptions         = &color_desc;
+      pi.target_info.num_color_targets                 = 1;
+      pi.target_info.has_depth_stencil_target          = true;
+      pi.target_info.depth_stencil_format              = depth_stencil_format;
+      pi.depth_stencil_state.compare_op                = SDL_GPU_COMPAREOP_ALWAYS;
+      pi.depth_stencil_state.enable_depth_test         = false;
+      pi.depth_stencil_state.enable_depth_write        = false;
+
+      contour_pipeline = SDL_CreateGPUGraphicsPipeline(device, &pi);
+    }
+    if (vert) SDL_ReleaseGPUShader(device, vert);
+    if (frag) SDL_ReleaseGPUShader(device, frag);
+  }
+
+  SDL_Log("TerrainRenderer: Graphics pipelines created");
+}
+
+
+
+
+void TerrainRenderer::init_compute_pipelines(SDL_GPUDevice *device) {
+  std::string shader_dir = SHADER_DIR;
+  SDL_Log("TerrainRenderer: Loading compute shaders from %s", shader_dir.c_str());
+
+
+  std::string gen_path = shader_dir + "/generate_clusters.comp.glsl.spv";
+  SDL_Log("TerrainRenderer: Creating cluster_gen_pipeline from %s", gen_path.c_str());
+  cluster_gen_pipeline = create_compute_pipeline(
+      device,
+      gen_path.c_str(),
+      1,
+      1,
+      0);
+
+
+  std::string cull_path = shader_dir + "/light_culling.comp.glsl.spv";
+  SDL_Log("TerrainRenderer: Creating light_culling_pipeline from %s", cull_path.c_str());
+  light_culling_pipeline = create_compute_pipeline(
+      device,
+      cull_path.c_str(),
+      2,
+      5,
+      0);
+
+  if (cluster_gen_pipeline && light_culling_pipeline)
+    SDL_Log("TerrainRenderer: Compute pipelines created");
+  else
+    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                 "TerrainRenderer: Failed to create one or more compute pipelines");
+}
+
+
+
+
+void TerrainRenderer::init_cluster_buffers(SDL_GPUDevice *device,
+                                            uint32_t tilesX, uint32_t tilesY,
+                                            uint32_t num_slices) {
+  release_cluster_buffers(device);
+
+  uint32_t num_clusters = tilesX * tilesY * num_slices;
+
+
+  cluster_aabb_ssbo = create_gpu_buffer(
+      device,
+      num_clusters * 32,
+      SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ |
+      SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE);
+
+
+
+  light_grid_ssbo = create_zeroed_gpu_buffer(
+      device,
+      num_clusters * 8,
+      SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ |
+      SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE |
+      SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ);
+
+
+  global_index_ssbo = create_gpu_buffer(
+      device,
+      MAX_LIGHT_INDICES * sizeof(uint32_t),
+      SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ |
+      SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE |
+      SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ);
+
+
+  cull_counter_ssbo = create_zeroed_gpu_buffer(
+      device,
+      sizeof(uint32_t),
+      SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ |
+      SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE);
+
+
+  point_light_ssbo = create_gpu_buffer(
+      device,
+      MAX_LIGHTS * sizeof(GpuPointLight),
+      SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ |
+      SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE |
+      SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ);
+
+  cluster_grid_w = tilesX;
+  cluster_grid_y = tilesY;
+
+  SDL_Log("TerrainRenderer: Cluster buffers created (%u×%u×%u clusters)",
+          tilesX, tilesY, num_slices);
+}
+
+
+
+
+void TerrainRenderer::upload_mesh(SDL_GPUDevice *device, const TerrainMesh &mesh) {
+  SDL_WaitForGPUIdle(device);
+  release_buffers(device);
+
+
+  {
+    std::vector<BasaltVertex> all_verts;
+    std::vector<uint32_t>     all_indices;
+    basalt_side_index_count  = 0;
+    basalt_total_index_count = 0;
+
+    if (!mesh.basalt_layers.empty() && !mesh.basalt_layers[0].vertices.empty()) {
+      uint32_t vo = (uint32_t)all_verts.size();
+      all_verts.insert(all_verts.end(),
+                       mesh.basalt_layers[0].vertices.begin(),
+                       mesh.basalt_layers[0].vertices.end());
+      for (uint32_t idx : mesh.basalt_layers[0].indices)
+        all_indices.push_back(idx + vo);
+      basalt_side_index_count = (uint32_t)mesh.basalt_layers[0].indices.size();
+    }
+    if (mesh.basalt_layers.size() > 1 && !mesh.basalt_layers[1].vertices.empty()) {
+      uint32_t vo = (uint32_t)all_verts.size();
+      all_verts.insert(all_verts.end(),
+                       mesh.basalt_layers[1].vertices.begin(),
+                       mesh.basalt_layers[1].vertices.end());
+      for (uint32_t idx : mesh.basalt_layers[1].indices)
+        all_indices.push_back(idx + vo);
+    }
+    basalt_total_index_count = (uint32_t)all_indices.size();
+
+    if (!all_verts.empty() && !all_indices.empty()) {
+      basalt_vbo = upload_to_gpu_buffer(
+          device, all_verts.data(),
+          (uint32_t)(all_verts.size() * sizeof(BasaltVertex)),
+          SDL_GPU_BUFFERUSAGE_VERTEX);
+      basalt_ibo = upload_to_gpu_buffer(
+          device, all_indices.data(),
+          (uint32_t)(all_indices.size() * sizeof(uint32_t)),
+          SDL_GPU_BUFFERUSAGE_INDEX);
+    }
+  }
+
+
+  if (!mesh.lava_vertices.empty()) {
+    lava_vbo = upload_to_gpu_buffer(
+        device, mesh.lava_vertices.data(),
+        (uint32_t)(mesh.lava_vertices.size() * sizeof(GpuLavaVertex)),
+        SDL_GPU_BUFFERUSAGE_VERTEX);
+    lava_vertex_count = (uint32_t)mesh.lava_vertices.size();
+
+    if (!mesh.lava_indices.empty()) {
+      lava_ibo = upload_to_gpu_buffer(
+          device, mesh.lava_indices.data(),
+          (uint32_t)(mesh.lava_indices.size() * sizeof(uint32_t)),
+          SDL_GPU_BUFFERUSAGE_INDEX);
+      lava_index_count = (uint32_t)mesh.lava_indices.size();
+    }
+  }
+
+
+  if (!mesh.contour_vertices.empty()) {
+    contour_vbo = upload_to_gpu_buffer(
+        device, mesh.contour_vertices.data(),
+        (uint32_t)(mesh.contour_vertices.size() * sizeof(ContourVertex)),
+        SDL_GPU_BUFFERUSAGE_VERTEX);
+    contour_vertex_count = (uint32_t)mesh.contour_vertices.size();
+  }
+
+  has_data = true;
+  SDL_Log("TerrainRenderer: Mesh uploaded (basalt=%u idx, lava=%u verts, %u idx, contour=%u)",
+          basalt_total_index_count, lava_vertex_count, lava_index_count, contour_vertex_count);
+}
+
+
+
+
+void TerrainRenderer::upload_lights(const std::vector<GpuPointLight> &lights) {
+  if (!point_light_ssbo || lights.empty()) {
+    current_light_count = 0;
+    return;
+  }
+
+  uint32_t count = (uint32_t)std::min(lights.size(), (size_t)MAX_LIGHTS);
+
+  SDL_GPUTransferBufferCreateInfo ti = {};
+  ti.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+  ti.size  = count * (uint32_t)sizeof(GpuPointLight);
+  SDL_GPUTransferBuffer *transfer = SDL_CreateGPUTransferBuffer(gpu_device, &ti);
+  if (!transfer) { current_light_count = 0; return; }
+
+  void *mapped = SDL_MapGPUTransferBuffer(gpu_device, transfer, false);
+  if (!mapped) {
+    SDL_ReleaseGPUTransferBuffer(gpu_device, transfer);
+    current_light_count = 0;
+    return;
+  }
+  SDL_memcpy(mapped, lights.data(), count * sizeof(GpuPointLight));
+  SDL_UnmapGPUTransferBuffer(gpu_device, transfer);
+
+  SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(gpu_device);
+  SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(cmd);
+  SDL_GPUTransferBufferLocation src = { transfer, 0 };
+  SDL_GPUBufferRegion           dst = { point_light_ssbo, 0,
+                                        count * (uint32_t)sizeof(GpuPointLight) };
+  SDL_UploadToGPUBuffer(copy, &src, &dst, false);
+  SDL_EndGPUCopyPass(copy);
+  SDL_SubmitGPUCommandBuffer(cmd);
+
+  SDL_ReleaseGPUTransferBuffer(gpu_device, transfer);
+  current_light_count = count;
+  static bool logged_count = false;
+  if (!logged_count && count > 0) {
+    SDL_Log("TerrainRenderer: Uploaded %u lights", count);
+    logged_count = true;
+  }
+}
+
+
+
+
+void TerrainRenderer::rebuild_clusters_if_needed(SDL_GPUCommandBuffer *cmd,
+                                                  uint32_t w, uint32_t h,
+                                                  float tile_px, uint32_t num_slices,
+                                                  float near_plane, float far_plane) {
+  uint32_t tilesX = (uint32_t)std::ceil(w / tile_px);
+  uint32_t tilesY = (uint32_t)std::ceil(h / tile_px);
+
+  if (tilesX == cluster_grid_w && tilesY == cluster_grid_y) return;
+
+
+  init_cluster_buffers(gpu_device, tilesX, tilesY, num_slices);
+
+  if (!cluster_gen_pipeline || !cluster_aabb_ssbo) return;
+
+
+  struct ClusterGenUniforms {
+    float tile_px, grid_size_x, grid_size_y, num_slices;
+    float near_plane, far_plane, screen_w, screen_h;
+    float _pad0, _pad1;
+  } cu;
+  cu.tile_px     = tile_px;
+  cu.grid_size_x = (float)tilesX;
+  cu.grid_size_y = (float)tilesY;
+  cu.num_slices  = (float)num_slices;
+  cu.near_plane  = near_plane;
+  cu.far_plane   = far_plane;
+  cu.screen_w    = (float)w;
+  cu.screen_h    = (float)h;
+  cu._pad0 = cu._pad1 = 0.0f;
+
+  SDL_GPUStorageBufferReadWriteBinding rw_binds[1] = {};
+  rw_binds[0].buffer = cluster_aabb_ssbo;
+
+
+  SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(cmd, nullptr, 0, rw_binds, 1);
+  SDL_BindGPUComputePipeline(pass, cluster_gen_pipeline);
+  SDL_PushGPUComputeUniformData(cmd, 0, &cu, sizeof(cu));
+
+
+
+  uint32_t dispX = (tilesX + 15) / 16;
+  uint32_t dispY = (tilesY + 8) / 9;
+  SDL_DispatchGPUCompute(pass, dispX, dispY, num_slices);
+  SDL_EndGPUComputePass(pass);
+}
+
+
+
+
+void TerrainRenderer::stage_geometry(SDL_GPURenderPass *pass,
+                                      SDL_GPUCommandBuffer *cmd,
+                                      const SceneUniforms &uniforms) {
+  if (!basalt_vbo || !basalt_ibo || basalt_total_index_count == 0) return;
+
+  SDL_BindGPUGraphicsPipeline(pass, terrain_pipeline);
+  SDL_PushGPUVertexUniformData(cmd, 0, &uniforms, sizeof(uniforms));
+  SDL_PushGPUFragmentUniformData(cmd, 0, &uniforms, sizeof(uniforms));
+
+  if (point_light_ssbo && light_grid_ssbo && global_index_ssbo) {
+    SDL_GPUBuffer *storage_bufs[3] = {
+        point_light_ssbo, light_grid_ssbo, global_index_ssbo };
+    SDL_BindGPUFragmentStorageBuffers(pass, 0, storage_bufs, 3);
+  }
+
+  SDL_GPUBufferBinding vbind = { basalt_vbo, 0 };
+  SDL_GPUBufferBinding ibind = { basalt_ibo, 0 };
+  SDL_BindGPUVertexBuffers(pass, 0, &vbind, 1);
+  SDL_BindGPUIndexBuffer(pass, &ibind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+  SDL_DrawGPUIndexedPrimitives(pass, basalt_total_index_count, 1, 0, 0, 0);
+}
+
+
+
+
+void TerrainRenderer::stage_cull_lights(SDL_GPUCommandBuffer *cmd,
+                                         const SceneUniforms &u,
+                                         const std::vector<GpuPointLight> &lights) {
+  if (!light_culling_pipeline || !cluster_aabb_ssbo || !light_grid_ssbo ||
+      !global_index_ssbo || !point_light_ssbo || !cull_counter_ssbo)
+    return;
+
+
+
+
+
+
+
+  {
+
+    if (!counter_reset_transfer) {
+      SDL_GPUTransferBufferCreateInfo ti = {};
+      ti.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+      ti.size  = sizeof(uint32_t);
+      counter_reset_transfer = SDL_CreateGPUTransferBuffer(gpu_device, &ti);
+    }
+
+    if (counter_reset_transfer) {
+      uint32_t *mapped = (uint32_t *)SDL_MapGPUTransferBuffer(gpu_device, counter_reset_transfer, false);
+      if (mapped) {
+        *mapped = 0;
+        SDL_UnmapGPUTransferBuffer(gpu_device, counter_reset_transfer);
+
+        SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(cmd);
+        SDL_GPUTransferBufferLocation src = { counter_reset_transfer, 0 };
+        SDL_GPUBufferRegion           dst = { cull_counter_ssbo, 0, sizeof(uint32_t) };
+        SDL_UploadToGPUBuffer(copy, &src, &dst, false);
+        SDL_EndGPUCopyPass(copy);
+      }
+    }
+  }
+
+
+  struct CullUniforms {
+    float tile_px, grid_size_x, grid_size_y, num_slices;
+    float near_plane, far_plane, screen_w, screen_h;
+    float light_count_f, _pad0, _pad1, _pad2;
+  } cu;
+  static_assert(sizeof(CullUniforms) == 48, "CullUniforms must be 48 bytes");
+  cu.tile_px       = u.tile_px;
+  cu.grid_size_x   = u.grid_size_x;
+  cu.grid_size_y   = u.grid_size_y;
+  cu.num_slices    = u.num_slices;
+  cu.near_plane    = u.near_plane;
+  cu.far_plane     = u.far_plane;
+  cu.screen_w      = u.grid_size_x * u.tile_px;
+  cu.screen_h      = u.grid_size_y * u.tile_px;
+  cu.light_count_f = (float)current_light_count;
+  cu._pad0 = cu._pad1 = cu._pad2 = 0.0f;
+  glm::mat4 view_proj = u.projection * u.view;
+
+
+
+  SDL_GPUStorageBufferReadWriteBinding rw[5] = {};
+  rw[0].buffer = point_light_ssbo;
+  rw[1].buffer = cluster_aabb_ssbo;
+  rw[2].buffer = light_grid_ssbo;
+  rw[3].buffer = global_index_ssbo;
+  rw[4].buffer = cull_counter_ssbo;
+
+  SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(cmd, nullptr, 0, rw, 5);
+  SDL_BindGPUComputePipeline(pass, light_culling_pipeline);
+  SDL_PushGPUComputeUniformData(cmd, 0, &cu, sizeof(cu));
+  SDL_PushGPUComputeUniformData(cmd, 1, &view_proj, sizeof(view_proj));
+
+
+  uint32_t dispX = (cluster_grid_w + 15) / 16;
+  uint32_t dispY = (cluster_grid_y + 8) / 9;
+  uint32_t dispZ = 24;
+  SDL_DispatchGPUCompute(pass, dispX, dispY, dispZ);
+  SDL_EndGPUComputePass(pass);
+}
+
+
+
+
+void TerrainRenderer::stage_shaded_draw(SDL_GPURenderPass *pass,
+                                         SDL_GPUCommandBuffer *cmd,
+                                         const SceneUniforms &uniforms) {
+
+  if (basalt_vbo && basalt_ibo && basalt_total_index_count > 0 && terrain_pipeline) {
+    SDL_BindGPUGraphicsPipeline(pass, terrain_pipeline);
+    SDL_PushGPUVertexUniformData(cmd, 0, &uniforms, sizeof(uniforms));
+    SDL_PushGPUFragmentUniformData(cmd, 0, &uniforms, sizeof(uniforms));
+
+    if (point_light_ssbo) {
+      SDL_BindGPUFragmentStorageBuffers(pass, 0, &point_light_ssbo, 1);
+    }
+
+    SDL_GPUBufferBinding vbind = { basalt_vbo, 0 };
+    SDL_GPUBufferBinding ibind = { basalt_ibo, 0 };
+    SDL_BindGPUVertexBuffers(pass, 0, &vbind, 1);
+    SDL_BindGPUIndexBuffer(pass, &ibind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+    SDL_DrawGPUIndexedPrimitives(pass, basalt_total_index_count, 1, 0, 0, 0);
+  }
+
+
+  if (lava_vbo && lava_ibo && lava_index_count > 0 && lava_pipeline) {
+    SDL_BindGPUGraphicsPipeline(pass, lava_pipeline);
+    SDL_PushGPUVertexUniformData(cmd, 0, &uniforms, sizeof(uniforms));
+    SDL_GPUBufferBinding vbind = { lava_vbo, 0 };
+    SDL_GPUBufferBinding ibind = { lava_ibo, 0 };
+    SDL_BindGPUVertexBuffers(pass, 0, &vbind, 1);
+    SDL_BindGPUIndexBuffer(pass, &ibind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+    SDL_DrawGPUIndexedPrimitives(pass, lava_index_count, 1, 0, 0, 0);
+  }
+
+
+  if (contour_vbo && contour_vertex_count > 0 && contour_pipeline) {
+    SDL_BindGPUGraphicsPipeline(pass, contour_pipeline);
+    SDL_PushGPUVertexUniformData(cmd, 0, &uniforms, sizeof(uniforms));
+    SDL_GPUBufferBinding vbind = { contour_vbo, 0 };
+    SDL_BindGPUVertexBuffers(pass, 0, &vbind, 1);
+    SDL_DrawGPUPrimitives(pass, contour_vertex_count, 1, 0, 0);
+  }
+}
+
+
+
+
+void TerrainRenderer::draw(SDL_GPUCommandBuffer *cmd,
+                            SDL_GPUTexture *swapchain,
+                            uint32_t w, uint32_t h,
+                            const SceneUniforms &uniforms,
+                            const std::vector<GpuPointLight> &lights) {
+  if (!initialized || !has_data) return;
+
+  upload_lights(lights);
+  stage_cull_lights(cmd, uniforms, lights);
+
+  SDL_GPURenderPass *pass = begin_render_pass_load(cmd, swapchain, w, h);
+  if (!pass) return;
+  stage_shaded_draw(pass, cmd, uniforms);
+  SDL_EndGPURenderPass(pass);
+}
+
+
+
+
+SDL_GPURenderPass *TerrainRenderer::begin_render_pass(SDL_GPUCommandBuffer *cmd,
+                                                       SDL_GPUTexture *swapchain,
+                                                       uint32_t w, uint32_t h) {
+
+  if (!depth_texture || depth_w != w || depth_h != h) {
+    if (depth_texture) {
+      SDL_ReleaseGPUTexture(gpu_device, depth_texture);
+      depth_texture = nullptr;
+    }
+    SDL_GPUTextureCreateInfo ti = {};
+    ti.type                = SDL_GPU_TEXTURETYPE_2D;
+    ti.format              = depth_stencil_format;
+    ti.width               = w;
+    ti.height              = h;
+    ti.layer_count_or_depth = 1;
+    ti.num_levels          = 1;
+    ti.usage               = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+    depth_texture          = SDL_CreateGPUTexture(gpu_device, &ti);
+    depth_w = w;
+    depth_h = h;
+  }
+
+  SDL_GPUColorTargetInfo color_target = {};
+  color_target.texture     = swapchain;
+  color_target.load_op     = SDL_GPU_LOADOP_CLEAR;
+  color_target.store_op    = SDL_GPU_STOREOP_STORE;
+  color_target.clear_color = { 0.0f, 0.0f, 0.0f, 1.0f };
+  color_target.cycle       = false;
+
+  SDL_GPUDepthStencilTargetInfo depth_target = {};
+  depth_target.texture          = depth_texture;
+  depth_target.load_op          = SDL_GPU_LOADOP_CLEAR;
+  depth_target.store_op         = SDL_GPU_STOREOP_STORE;
+  depth_target.clear_depth      = 1.0f;
+  depth_target.stencil_load_op  = SDL_GPU_LOADOP_CLEAR;
+  depth_target.stencil_store_op = SDL_GPU_STOREOP_STORE;
+  depth_target.clear_stencil    = 0;
+  depth_target.cycle            = false;
+
+  return SDL_BeginGPURenderPass(cmd, &color_target, 1, &depth_target);
+}
+
+
+
+
+SDL_GPURenderPass *TerrainRenderer::begin_render_pass_load(SDL_GPUCommandBuffer *cmd,
+                                                            SDL_GPUTexture *swapchain,
+                                                            uint32_t w, uint32_t h) {
+
+  if (!depth_texture || depth_w != w || depth_h != h) {
+    if (depth_texture) {
+      SDL_ReleaseGPUTexture(gpu_device, depth_texture);
+      depth_texture = nullptr;
+    }
+    SDL_GPUTextureCreateInfo ti = {};
+    ti.type                 = SDL_GPU_TEXTURETYPE_2D;
+    ti.format               = depth_stencil_format;
+    ti.width                = w;
+    ti.height               = h;
+    ti.layer_count_or_depth = 1;
+    ti.num_levels           = 1;
+    ti.usage                = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+    depth_texture           = SDL_CreateGPUTexture(gpu_device, &ti);
+    depth_w = w;
+    depth_h = h;
+  }
+
+
+  SDL_GPUColorTargetInfo color_target = {};
+  color_target.texture   = swapchain;
+  color_target.load_op   = SDL_GPU_LOADOP_LOAD;
+  color_target.store_op  = SDL_GPU_STOREOP_STORE;
+  color_target.cycle     = false;
+
+
+  SDL_GPUDepthStencilTargetInfo depth_target = {};
+  depth_target.texture          = depth_texture;
+  depth_target.load_op          = SDL_GPU_LOADOP_CLEAR;
+  depth_target.store_op         = SDL_GPU_STOREOP_STORE;
+  depth_target.clear_depth      = 1.0f;
+  depth_target.stencil_load_op  = SDL_GPU_LOADOP_CLEAR;
+  depth_target.stencil_store_op = SDL_GPU_STOREOP_STORE;
+  depth_target.clear_stencil    = 0;
+  depth_target.cycle            = false;
+
+  return SDL_BeginGPURenderPass(cmd, &color_target, 1, &depth_target);
+}
+
+
+
+
+void TerrainRenderer::release_buffers(SDL_GPUDevice *device) {
+  if (basalt_vbo) { SDL_ReleaseGPUBuffer(device, basalt_vbo); basalt_vbo = nullptr; }
+  if (basalt_ibo) { SDL_ReleaseGPUBuffer(device, basalt_ibo); basalt_ibo = nullptr; }
+  if (lava_vbo)   { SDL_ReleaseGPUBuffer(device, lava_vbo);   lava_vbo   = nullptr; }
+  if (lava_ibo)   { SDL_ReleaseGPUBuffer(device, lava_ibo);   lava_ibo   = nullptr; }
+  if (void_vbo)   { SDL_ReleaseGPUBuffer(device, void_vbo);   void_vbo   = nullptr; }
+  if (contour_vbo){ SDL_ReleaseGPUBuffer(device, contour_vbo);contour_vbo = nullptr; }
+  has_data = false;
+}
+
+void TerrainRenderer::release_cluster_buffers(SDL_GPUDevice *device) {
+  if (point_light_ssbo)  { SDL_ReleaseGPUBuffer(device, point_light_ssbo);  point_light_ssbo  = nullptr; }
+  if (cluster_aabb_ssbo) { SDL_ReleaseGPUBuffer(device, cluster_aabb_ssbo); cluster_aabb_ssbo = nullptr; }
+  if (light_grid_ssbo)   { SDL_ReleaseGPUBuffer(device, light_grid_ssbo);   light_grid_ssbo   = nullptr; }
+  if (global_index_ssbo) { SDL_ReleaseGPUBuffer(device, global_index_ssbo); global_index_ssbo = nullptr; }
+  if (cull_counter_ssbo) { SDL_ReleaseGPUBuffer(device, cull_counter_ssbo); cull_counter_ssbo = nullptr; }
+  if (counter_reset_transfer) { SDL_ReleaseGPUTransferBuffer(device, counter_reset_transfer); counter_reset_transfer = nullptr; }
+  cluster_grid_w = 0;
+  cluster_grid_y = 0;
+}
+
+void TerrainRenderer::cleanup(SDL_GPUDevice *device) {
+  SDL_WaitForGPUIdle(device);
+
+  release_buffers(device);
+  release_cluster_buffers(device);
+
+  if (depth_texture)            { SDL_ReleaseGPUTexture(device, depth_texture);                        depth_texture            = nullptr; }
+  if (terrain_pipeline)         { SDL_ReleaseGPUGraphicsPipeline(device, terrain_pipeline);            terrain_pipeline         = nullptr; }
+  if (terrain_stencil_pipeline) { SDL_ReleaseGPUGraphicsPipeline(device, terrain_stencil_pipeline);   terrain_stencil_pipeline = nullptr; }
+  if (lava_pipeline)            { SDL_ReleaseGPUGraphicsPipeline(device, lava_pipeline);               lava_pipeline            = nullptr; }
+  if (contour_pipeline)         { SDL_ReleaseGPUGraphicsPipeline(device, contour_pipeline);            contour_pipeline         = nullptr; }
+  if (cluster_gen_pipeline)     { SDL_ReleaseGPUComputePipeline(device, cluster_gen_pipeline);         cluster_gen_pipeline     = nullptr; }
+  if (light_culling_pipeline)   { SDL_ReleaseGPUComputePipeline(device, light_culling_pipeline);       light_culling_pipeline   = nullptr; }
+
+  initialized = false;
+  SDL_Log("TerrainRenderer: Cleaned up");
+}

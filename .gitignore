@@ -1,0 +1,77 @@
+# Build directories
+build/
+cmake-build-*/
+out/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+*.cmake
+
+# Compiled Object files
+*.o
+*.obj
+*.slo
+*.lo
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.a
+*.lib
+*.la
+
+# Executables
+*.exe
+*.out
+*.app
+topogen
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# IDE specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ImGui (downloaded/symlinked)
+imgui/
+
+# Neovim
+*.un~
+.netrwhist
+
+# Compiler-specific
+*.d
+*.gcno
+*.gcda
+
+# Log files
+*.log
+
+# Cache
+.cache/
+
+# Backup files
+*.bak
+*.tmp
+
+# Claude-specific files
+claude_to_do.md
+CLAUDE.md
