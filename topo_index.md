@@ -196,8 +196,8 @@ IMORTANT:
         - `void TopoGame::on_init(GpuContext &gpu, flecs::world &ecs)` — calls task_system.init(1)
         - `void TopoGame::on_event(const SDL_Event &event, flecs::world &ecs)`
         - `void TopoGame::on_render_tool(GpuContext &gpu, FrameContext &frame, flecs::world &ecs)`
-        - `void TopoGame::on_pre_frame_game(GpuContext &gpu, flecs::world &ecs)` — called before gpu_acquire_game_frame; if ready_mesh_pending is set and terrain_renderer is initialized, calls terrain_renderer.upload_mesh (safe: no frame cmd buffer open), swaps ECS MapData/ContourData, frees old data on worker thread, clears ready_*_pending fields
-        - `void TopoGame::on_render_game(GpuContext &gpu, FrameContext &frame, flecs::world &ecs)` — async regen: kicks worker via task_system.enqueue; polls async_terrain and moves completed results into ready_mesh_pending/ready_map_pending/ready_contours_pending (does NOT call upload_mesh here); calls terrain_renderer.draw(..., gpu.upload_manager)
+        - `void TopoGame::on_pre_frame_game(GpuContext &gpu, flecs::world &ecs)` — called before gpu_acquire_game_frame; (1) uploads ready_mesh_pending if set; (2) checks depth_needs_rebuild and derives cluster need from desired_depth_w/h or current depth_width/height; (3) if either is needed, SDL_WaitForGPUIdle once → prepare_frame_resources (depth rebuild first) → rebuild_clusters_if_needed using depth_width/height as authoritative size; cluster rebuild always uses post-depth-rebuild dimensions to stay consistent
+        - `void TopoGame::on_render_game(GpuContext &gpu, FrameContext &frame, flecs::world &ecs)` — async regen: kicks worker via task_system.enqueue; polls async_terrain and moves completed results into ready_mesh_pending/ready_map_pending/ready_contours_pending (does NOT call upload_mesh or rebuild_clusters_if_needed here); calls terrain_renderer.draw(..., gpu.upload_manager); begin_render_pass sets desired_depth_w/h from frame.swapchain_w/h; returns early (if !bg_pass) without triggering any rebuild
         - `void TopoGame::on_cleanup(flecs::world &ecs)` — calls task_system.shutdown() before terrain_renderer.cleanup()
         - `bool TopoGame::wants_game_window_open(flecs::world &ecs)`
         - `bool TopoGame::wants_game_window_close(flecs::world &ecs)`
@@ -473,6 +473,7 @@ IMORTANT:
           - `void TerrainRenderer::stage_cull_lights(SDL_GPUCommandBuffer *cmd, const SceneUniforms &u, const std::vector<GpuPointLight> &lights)`
           - `void TerrainRenderer::stage_shaded_draw(SDL_GPURenderPass *pass, SDL_GPUCommandBuffer *cmd, const SceneUniforms &uniforms)` — now binds all 3 fragment storage buffers: point_light_ssbo, light_grid_ssbo, global_index_ssbo
           - `void TerrainRenderer::draw(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, uint32_t w, uint32_t h, const SceneUniforms &uniforms, const std::vector<GpuPointLight> &lights, UploadManager &uploader)`
+          - `void TerrainRenderer::prepare_frame_resources(SDL_GPUDevice *device)` — called from on_pre_frame_game (no frame cmd buf open); releases and recreates depth texture if desired_depth_w/h differ from depth_w/h; caller must have already called SDL_WaitForGPUIdle
           - `void TerrainRenderer::release_buffers(SDL_GPUDevice *device)`
           - `void TerrainRenderer::release_cluster_buffers(SDL_GPUDevice *device)`
           - `void TerrainRenderer::cleanup(SDL_GPUDevice *device)`
@@ -482,14 +483,19 @@ IMORTANT:
           - `void draw(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, uint32_t w, uint32_t h, const SceneUniforms &uniforms, const std::vector<GpuPointLight> &lights, UploadManager &uploader)` — includes gpu/gpu.h for UploadManager
           - `void rebuild_clusters_if_needed(SDL_GPUCommandBuffer *cmd, uint32_t w, uint32_t h, float tile_px, uint32_t num_slices, float near_plane, float far_plane)`
           - `void rebuild_dirty_pipelines(SDL_Window *window)`
-          - `SDL_GPURenderPass *begin_render_pass(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, uint32_t w, uint32_t h)`
-          - `SDL_GPURenderPass *begin_render_pass_load(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, uint32_t w, uint32_t h)`
+          - `SDL_GPURenderPass *begin_render_pass(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, uint32_t w, uint32_t h)` — sets desired_depth_w/h; returns nullptr if depth_texture is not ready for current dimensions
+          - `SDL_GPURenderPass *begin_render_pass_load(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, uint32_t w, uint32_t h)` — sets desired_depth_w/h; returns nullptr if depth_texture is not ready for current dimensions
+          - `void prepare_frame_resources(SDL_GPUDevice *device)` — called from on_pre_frame_game after SDL_WaitForGPUIdle; releases and recreates depth texture if desired_depth_w/h differ from depth_w/h; must be called before cluster rebuild so depth_width/height() returns the correct size
+          - `bool depth_needs_rebuild() const` — returns true if desired_depth_w/h are nonzero and differ from depth_w/h
           - `void cleanup(SDL_GPUDevice *device)`
           - `bool is_initialized() const`
           - `bool has_mesh() const`
           - `SDL_GPUTextureFormat get_depth_format() const`
           - `uint32_t cluster_tiles_x() const`
           - `uint32_t cluster_tiles_y() const`
+          - `uint32_t depth_width() const` — current depth texture width (0 until first prepare_frame_resources)
+          - `uint32_t depth_height() const` — current depth texture height
+          - `uint32_t desired_depth_w, desired_depth_h` — public; set by begin_render_pass/begin_render_pass_load from swapchain size; read by on_pre_frame_game for depth and cluster rebuild decisions
           - `private: void init_graphics_pipelines(SDL_GPUDevice *device, SDL_Window *window)`
           - `void init_compute_pipelines(SDL_GPUDevice *device)`
           - `void init_cluster_buffers(SDL_GPUDevice *device, uint32_t tilesX, uint32_t tilesY, uint32_t num_slices)`

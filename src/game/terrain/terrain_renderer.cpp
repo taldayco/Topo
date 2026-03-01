@@ -76,6 +76,13 @@ void TerrainRenderer::init(SDL_GPUDevice *device, SDL_Window *window, AssetManag
   init_graphics_pipelines(device, window);
   init_compute_pipelines(device);
 
+  // Small dummy buffer used as a valid fallback for unbound SSBOs.
+  // The terrain shader declares 3 fragment storage buffers; all 3 must be
+  // bound even when cluster buffers haven't been created yet.
+  dummy_ssbo = gpu_create_zeroed_buffer(device, 4,
+      SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ |
+      SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ);
+
   initialized = true;
   SDL_Log("TerrainRenderer: Initialized (graphics + compute pipelines)");
 }
@@ -810,8 +817,12 @@ void TerrainRenderer::stage_shaded_draw(SDL_GPURenderPass *pass,
     SDL_PushGPUVertexUniformData(cmd, 0, &uniforms, sizeof(uniforms));
     SDL_PushGPUFragmentUniformData(cmd, 0, &uniforms, sizeof(uniforms));
 
-    if (point_light_ssbo && light_grid_ssbo && global_index_ssbo) {
-      SDL_GPUBuffer *frag_storage[3] = { point_light_ssbo, light_grid_ssbo, global_index_ssbo };
+    {
+      SDL_GPUBuffer *frag_storage[3] = {
+        point_light_ssbo  ? point_light_ssbo  : dummy_ssbo,
+        light_grid_ssbo   ? light_grid_ssbo   : dummy_ssbo,
+        global_index_ssbo ? global_index_ssbo : dummy_ssbo,
+      };
       SDL_BindGPUFragmentStorageBuffers(pass, 0, frag_storage, 3);
     }
 
@@ -870,23 +881,9 @@ SDL_GPURenderPass *TerrainRenderer::begin_render_pass(SDL_GPUCommandBuffer *cmd,
                                                        SDL_GPUTexture *swapchain,
                                                        uint32_t w, uint32_t h) {
 
-  if (!depth_texture || depth_w != w || depth_h != h) {
-    if (depth_texture) {
-      SDL_ReleaseGPUTexture(gpu_device, depth_texture);
-      depth_texture = nullptr;
-    }
-    SDL_GPUTextureCreateInfo ti = {};
-    ti.type                = SDL_GPU_TEXTURETYPE_2D;
-    ti.format              = depth_stencil_format;
-    ti.width               = w;
-    ti.height              = h;
-    ti.layer_count_or_depth = 1;
-    ti.num_levels          = 1;
-    ti.usage               = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
-    depth_texture          = SDL_CreateGPUTexture(gpu_device, &ti);
-    depth_w = w;
-    depth_h = h;
-  }
+  desired_depth_w = w;
+  desired_depth_h = h;
+  if (!depth_texture || depth_w != w || depth_h != h) return nullptr;
 
   SDL_GPUColorTargetInfo color_target = {};
   color_target.texture     = swapchain;
@@ -915,24 +912,9 @@ SDL_GPURenderPass *TerrainRenderer::begin_render_pass_load(SDL_GPUCommandBuffer 
                                                             SDL_GPUTexture *swapchain,
                                                             uint32_t w, uint32_t h) {
 
-  if (!depth_texture || depth_w != w || depth_h != h) {
-    if (depth_texture) {
-      SDL_ReleaseGPUTexture(gpu_device, depth_texture);
-      depth_texture = nullptr;
-    }
-    SDL_GPUTextureCreateInfo ti = {};
-    ti.type                 = SDL_GPU_TEXTURETYPE_2D;
-    ti.format               = depth_stencil_format;
-    ti.width                = w;
-    ti.height               = h;
-    ti.layer_count_or_depth = 1;
-    ti.num_levels           = 1;
-    ti.usage                = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
-    depth_texture           = SDL_CreateGPUTexture(gpu_device, &ti);
-    depth_w = w;
-    depth_h = h;
-  }
-
+  desired_depth_w = w;
+  desired_depth_h = h;
+  if (!depth_texture || depth_w != w || depth_h != h) return nullptr;
 
   SDL_GPUColorTargetInfo color_target = {};
   color_target.texture   = swapchain;
@@ -956,6 +938,31 @@ SDL_GPURenderPass *TerrainRenderer::begin_render_pass_load(SDL_GPUCommandBuffer 
 
 
 
+
+void TerrainRenderer::prepare_frame_resources(SDL_GPUDevice *device) {
+  if (desired_depth_w == 0 || desired_depth_h == 0) return;
+  if (depth_texture && depth_w == desired_depth_w && depth_h == desired_depth_h) return;
+
+  // Caller (on_pre_frame_game) has already called SDL_WaitForGPUIdle.
+  if (depth_texture) {
+    SDL_ReleaseGPUTexture(device, depth_texture);
+    depth_texture = nullptr;
+  }
+
+  SDL_GPUTextureCreateInfo ti = {};
+  ti.type                 = SDL_GPU_TEXTURETYPE_2D;
+  ti.format               = depth_stencil_format;
+  ti.width                = desired_depth_w;
+  ti.height               = desired_depth_h;
+  ti.layer_count_or_depth = 1;
+  ti.num_levels           = 1;
+  ti.usage                = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+  depth_texture           = SDL_CreateGPUTexture(device, &ti);
+  depth_w = desired_depth_w;
+  depth_h = desired_depth_h;
+
+  SDL_Log("TerrainRenderer: Depth texture (re)created (%ux%u)", depth_w, depth_h);
+}
 
 void TerrainRenderer::release_buffers(SDL_GPUDevice *device) {
   auto rel = [&](SDL_GPUBuffer *&buf, const char *key) {
@@ -997,6 +1004,7 @@ void TerrainRenderer::cleanup(SDL_GPUDevice *device) {
   release_buffers(device);
   release_cluster_buffers(device);
 
+  if (dummy_ssbo)               { SDL_ReleaseGPUBuffer(device, dummy_ssbo);                           dummy_ssbo               = nullptr; }
   if (depth_texture)            { SDL_ReleaseGPUTexture(device, depth_texture);                        depth_texture            = nullptr; }
   if (terrain_pipeline)         { SDL_ReleaseGPUGraphicsPipeline(device, terrain_pipeline);            terrain_pipeline         = nullptr; }
   if (terrain_stencil_pipeline) { SDL_ReleaseGPUGraphicsPipeline(device, terrain_stencil_pipeline);   terrain_stencil_pipeline = nullptr; }

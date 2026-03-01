@@ -10,6 +10,7 @@
 #include <fstream>
 #include <glm/glm.hpp>
 #include <algorithm>
+#include <cmath>
 
 using json = nlohmann::json;
 
@@ -161,32 +162,75 @@ void TopoGame::on_render_tool(GpuContext &gpu, FrameContext &frame, flecs::world
 }
 
 void TopoGame::on_pre_frame_game(GpuContext &gpu, flecs::world &ecs) {
-  if (!ready_mesh_pending || !terrain_renderer.is_initialized()) return;
+  if (!terrain_renderer.is_initialized()) return;
 
-  // Called before gpu_acquire_game_frame — no frame command buffer is open.
-  // Safe to call SDL_WaitForGPUIdle inside upload_mesh here.
-  terrain_renderer.upload_mesh(gpu.device, *ready_mesh_pending);
+  // Upload pending mesh first — this may transition has_mesh() from false to true.
+  if (ready_mesh_pending) {
+    // No frame command buffer is open here, so SDL_WaitForGPUIdle inside
+    // upload_mesh is safe.
+    terrain_renderer.upload_mesh(gpu.device, *ready_mesh_pending);
 
-  auto *map_data = ecs.get_mut<MapData>();
-  auto *contours = ecs.get_mut<ContourData>();
+    auto *map_data = ecs.get_mut<MapData>();
+    auto *contours = ecs.get_mut<ContourData>();
 
-  if (map_data && ready_map_pending) {
-    // Free old data on the worker thread to avoid stalling the main thread.
-    auto old_map      = std::make_shared<MapData>(std::move(*map_data));
-    auto old_contours = std::make_shared<ContourData>(contours ? std::move(*contours) : ContourData{});
-    task_system.enqueue([old_map, old_contours]() {
-      (void)old_map;
-      (void)old_contours;
-    });
+    if (map_data && ready_map_pending) {
+      auto old_map      = std::make_shared<MapData>(std::move(*map_data));
+      auto old_contours = std::make_shared<ContourData>(contours ? std::move(*contours) : ContourData{});
+      task_system.enqueue([old_map, old_contours]() {
+        (void)old_map;
+        (void)old_contours;
+      });
 
-    *map_data = std::move(*ready_map_pending);
-    if (contours && ready_contours_pending)
-      *contours = std::move(*ready_contours_pending);
+      *map_data = std::move(*ready_map_pending);
+      if (contours && ready_contours_pending)
+        *contours = std::move(*ready_contours_pending);
+    }
+
+    ready_mesh_pending.reset();
+    ready_map_pending.reset();
+    ready_contours_pending.reset();
   }
 
-  ready_mesh_pending.reset();
-  ready_map_pending.reset();
-  ready_contours_pending.reset();
+  // Depth texture is rebuilt first (if needed), then clusters are sized to match.
+  // desired_depth_w/h are set by begin_render_pass from the validated swapchain size.
+  bool needs_depth_rebuild = terrain_renderer.depth_needs_rebuild();
+
+  // Use the depth texture dimensions (post-rebuild) for cluster sizing.
+  // desired_depth_w/h reflect the last confirmed swapchain size from begin_render_pass.
+  uint32_t target_w = terrain_renderer.depth_needs_rebuild()
+                      ? terrain_renderer.desired_depth_w  // will be built now
+                      : terrain_renderer.depth_width();    // already correct
+  uint32_t target_h = terrain_renderer.depth_needs_rebuild()
+                      ? terrain_renderer.desired_depth_h
+                      : terrain_renderer.depth_height();
+
+  bool needs_cluster_rebuild = false;
+  if (target_w > 0 && target_h > 0) {
+    uint32_t tilesX = (uint32_t)std::ceil(target_w / 16.0f);
+    uint32_t tilesY = (uint32_t)std::ceil(target_h / 16.0f);
+    needs_cluster_rebuild = (tilesX != terrain_renderer.cluster_tiles_x() ||
+                             tilesY != terrain_renderer.cluster_tiles_y());
+  }
+
+  if (needs_cluster_rebuild || needs_depth_rebuild) {
+    // Single wait covers both operations.
+    SDL_WaitForGPUIdle(gpu.device);
+
+    // Rebuild depth texture first so target_w/h are correct for cluster sizing.
+    terrain_renderer.prepare_frame_resources(gpu.device);
+
+    if (needs_cluster_rebuild) {
+      uint32_t w = terrain_renderer.depth_width();
+      uint32_t h = terrain_renderer.depth_height();
+      if (w > 0 && h > 0) {
+        SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(gpu.device);
+        if (cmd) {
+          terrain_renderer.rebuild_clusters_if_needed(cmd, w, h, 16.0f, 24, 1.0f, 1000.0f);
+          SDL_SubmitGPUCommandBuffer(cmd);
+        }
+      }
+    }
+  }
 }
 
 void TopoGame::on_render_game(GpuContext &gpu, FrameContext &frame, flecs::world &ecs) {
@@ -331,10 +375,6 @@ void TopoGame::on_render_game(GpuContext &gpu, FrameContext &frame, flecs::world
   if (terrain_renderer.has_mesh() && ts) {
     const auto *md = ecs.get<MapData>();
     static const MapData empty_map_data;
-
-    terrain_renderer.rebuild_clusters_if_needed(
-        frame.cmd, frame.swapchain_w, frame.swapchain_h,
-        16.0f, 24, 1.0f, 1000.0f);
 
     SceneUniforms uniforms = compute_uniforms(
         md ? *md : empty_map_data,

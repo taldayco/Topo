@@ -45,4 +45,5 @@ private:
   std::shared_ptr<TerrainMesh> ready_mesh_pending;
   std::shared_ptr<MapData>     ready_map_pending;
   std::shared_ptr<ContourData> ready_contours_pending;
+
 };
