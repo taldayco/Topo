@@ -952,11 +952,18 @@ void TerrainRenderer::release_buffers(SDL_GPUDevice *device) {
 }
 
 void TerrainRenderer::release_cluster_buffers(SDL_GPUDevice *device) {
-  if (point_light_ssbo)  { SDL_ReleaseGPUBuffer(device, point_light_ssbo);  point_light_ssbo  = nullptr; }
-  if (cluster_aabb_ssbo) { SDL_ReleaseGPUBuffer(device, cluster_aabb_ssbo); cluster_aabb_ssbo = nullptr; }
-  if (light_grid_ssbo)   { SDL_ReleaseGPUBuffer(device, light_grid_ssbo);   light_grid_ssbo   = nullptr; }
-  if (global_index_ssbo) { SDL_ReleaseGPUBuffer(device, global_index_ssbo); global_index_ssbo = nullptr; }
-  if (cull_counter_ssbo) { SDL_ReleaseGPUBuffer(device, cull_counter_ssbo); cull_counter_ssbo = nullptr; }
+  // Release through asset manager when available so the registry stays consistent.
+  auto rel = [&](SDL_GPUBuffer *&buf, const char *key) {
+    if (!buf) return;
+    if (asset_manager) { asset_manager->release_buffer(key); }
+    else               { SDL_ReleaseGPUBuffer(device, buf); }
+    buf = nullptr;
+  };
+  rel(point_light_ssbo,  "point_light_ssbo");
+  rel(cluster_aabb_ssbo, "cluster_aabb_ssbo");
+  rel(light_grid_ssbo,   "light_grid_ssbo");
+  rel(global_index_ssbo, "global_index_ssbo");
+  rel(cull_counter_ssbo, "cull_counter_ssbo");
   if (counter_reset_transfer) { SDL_ReleaseGPUTransferBuffer(device, counter_reset_transfer); counter_reset_transfer = nullptr; }
   cluster_grid_w = 0;
   cluster_grid_y = 0;

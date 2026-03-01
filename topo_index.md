@@ -1,5 +1,10 @@
 # Project Index
 
+IMORTANT:
+
+> only build topo in the build directory.
+> DO NOT output verbose explanations or thoughts as you work, remember this.
+
 - Topo/
   - shaders/
   - src/
@@ -16,6 +21,7 @@
         - `virtual bool wants_game_window_open(flecs::world &ecs)`
         - `virtual bool wants_game_window_close(flecs::world &ecs)`
         - `void request_quit()`
+        - `AssetManager asset_manager` — member of Application
       - camera/
         - camera.cpp
           - `static float lerp(float a, float b, float t)`
@@ -32,7 +38,41 @@
           - `void shake(CameraState &cam, float intensity, float duration)`
           - `void set_zoom(CameraState &cam, float zoom)`
           - `void apply_to_view(const CameraState &cam, ViewState &view)`
+          - `CameraMatrices build_matrices(const CameraState &cam, float aspect) const`
+          - `struct CameraMatrices` — glm::mat4 view, projection
       - core/
+        - asset_manager.h
+          - `struct ShaderAsset` — shader, path, last_mtime, stage, num_uniform_buffers, num_storage_buffers, num_sampler_textures, dirty
+          - `struct PipelineRecord` — vert_shader_key, frag_shader_key, needs_rebuild
+          - `void AssetManager::init(SDL_GPUDevice *device)`
+          - `SDL_GPUShader *AssetManager::load_shader(key, path, stage, num_uniform_buffers, num_storage_buffers, num_sampler_textures)`
+          - `SDL_GPUShader *AssetManager::load_compute_shader(key, path, num_uniform_buffers, num_rw_storage_buffers, num_ro_storage_buffers)`
+          - `void AssetManager::register_pipeline(key, vert_key, frag_key)`
+          - `void AssetManager::register_compute_pipeline(key, shader_key)`
+          - `void AssetManager::check_for_updates()`
+          - `bool AssetManager::pipeline_needs_rebuild(key) const`
+          - `void AssetManager::clear_rebuild_flag(key)`
+          - `void AssetManager::register_buffer(key, SDL_GPUBuffer *buffer)`
+          - `SDL_GPUBuffer *AssetManager::get_buffer(key) const`
+          - `void AssetManager::release_buffer(key)`
+          - `void AssetManager::clear()`
+          - `void AssetManager::render_debug_ui() const`
+        - asset_manager.cpp
+          - `static uint64_t AssetManager::get_mtime(const std::string &path)`
+          - `SDL_GPUShader *AssetManager::create_shader_internal(const ShaderAsset &meta)`
+          - `void AssetManager::init(SDL_GPUDevice *device)`
+          - `SDL_GPUShader *AssetManager::load_shader(...)`
+          - `SDL_GPUShader *AssetManager::load_compute_shader(...)`
+          - `void AssetManager::register_pipeline(...)`
+          - `void AssetManager::register_compute_pipeline(...)`
+          - `void AssetManager::check_for_updates()`
+          - `bool AssetManager::pipeline_needs_rebuild(const std::string &key) const`
+          - `void AssetManager::clear_rebuild_flag(const std::string &key)`
+          - `void AssetManager::register_buffer(const std::string &key, SDL_GPUBuffer *buffer)`
+          - `SDL_GPUBuffer *AssetManager::get_buffer(const std::string &key) const`
+          - `void AssetManager::release_buffer(const std::string &key)`
+          - `void AssetManager::clear()`
+          - `void AssetManager::render_debug_ui() const`
         - debug.h
           - `public: static DebugTracker& get()`
           - `void push(const char* file, int line, const char* func, const char* message = nullptr)`
@@ -76,14 +116,15 @@
           - `void bind(SDL_Scancode key, Action action)`
       - render/
         - background.cpp
-          - `static std::vector<uint8_t> load_shader_file(const char *path)`
-          - `std::vector<uint8_t> data(size)`
-          - `bool BackgroundRenderer::init(SDL_GPUDevice *device, SDL_GPUTextureFormat swapchain_format, SDL_GPUTextureFormat depth_format)`
+          - `bool BackgroundRenderer::build_pipeline(SDL_GPUTextureFormat swapchain_format, SDL_GPUTextureFormat depth_format)`
+          - `bool BackgroundRenderer::init(SDL_GPUDevice *device, SDL_GPUTextureFormat swapchain_format, SDL_GPUTextureFormat depth_format, AssetManager &am)`
+          - `void BackgroundRenderer::rebuild_if_dirty(SDL_GPUTextureFormat swapchain_format, SDL_GPUTextureFormat depth_format)`
           - `void BackgroundRenderer::draw(SDL_GPUCommandBuffer *cmd, SDL_GPURenderPass *render_pass, float time, float cam_x, float cam_y)`
           - `void BackgroundRenderer::cleanup()`
         - background.h
-          - `public: bool init(SDL_GPUDevice *device, SDL_GPUTextureFormat swapchain_format, SDL_GPUTextureFormat depth_format)`
+          - `public: bool init(SDL_GPUDevice *device, SDL_GPUTextureFormat swapchain_format, SDL_GPUTextureFormat depth_format, AssetManager &am)`
           - `void draw(SDL_GPUCommandBuffer *cmd, SDL_GPURenderPass *render_pass, float time, float cam_x, float cam_y)`
+          - `void rebuild_if_dirty(SDL_GPUTextureFormat swapchain_format, SDL_GPUTextureFormat depth_format)`
           - `void cleanup()`
         - render_system.cpp
           - `static uint32_t alpha_blend_rs(uint32_t src, uint32_t dst, float alpha)`
@@ -374,17 +415,24 @@
           - `static void add_hex_top(TerrainMesh &mesh, const Vec2 corners[6], float z, float offset_x, float offset_y, float cr, float cg, float cb, float global_depth_range, float sheen, TerrainMesh::RenderingLayer &layer)`
           - `static void add_side_face(TerrainMesh &mesh, const Vec2 &corner0, const Vec2 &corner1, float top_height, float bottom_height, const IsometricParams &params, float offset_x, float offset_y, float cr, float cg, float cb, float global_depth_range, float sheen, TerrainMesh::RenderingLayer &layer)`
           - `TerrainMesh build_terrain_mesh(const TerrainState &terrain, const MapData &map_data, const ContourData &contours)`
-          - `SceneUniforms compute_uniforms(const TerrainMesh &mesh, const MapData &map_data, const ViewState &view, uint32_t viewport_w, uint32_t viewport_h, uint32_t cluster_tiles_x, uint32_t cluster_tiles_y, float time, float contour_opacity)`
+          - `SceneUniforms compute_uniforms(const MapData &map_data, const glm::mat4 &view, const glm::mat4 &projection, uint32_t cluster_tiles_x, uint32_t cluster_tiles_y, float time, float contour_opacity, uint32_t light_count)`
         - terrain_mesh.h
           - `TerrainMesh build_terrain_mesh(const TerrainState &terrain, const MapData &map_data, const ContourData &contours)`
-          - `SceneUniforms compute_uniforms(const TerrainMesh &mesh, const MapData &map_data, const struct ViewState &view, uint32_t viewport_w, uint32_t viewport_h, uint32_t cluster_tiles_x, uint32_t cluster_tiles_y, float time, float contour_opacity)`
+          - `SceneUniforms compute_uniforms(const MapData &map_data, const glm::mat4 &view, const glm::mat4 &projection, uint32_t cluster_tiles_x, uint32_t cluster_tiles_y, float time, float contour_opacity, uint32_t light_count)`
+          - `struct SceneUniforms` — glm::mat4 view, projection; float time, contour_opacity, hex_border_width; lava_color_r/g/b; star_light_r/g/b/intensity; light_dir_x/y/z/ambient; light_col_r/g/b; grid_size_x/y, num_slices, tile_px; near_plane, far_plane, light_count_f
+          - `struct GpuPointLight` — pos_x/y/z, radius, color_r/g/b, intensity (32 bytes, std430)
+          - `struct BasaltVertex` — pos_x/y/z, color_r/g/b, sheen, nx/ny/nz
+          - `struct GpuLavaVertex` — pos_x/y/z, time_offset
+          - `struct ContourVertex` — pos_x/y/z
         - terrain_renderer.cpp
-          - `static std::vector<uint8_t> load_shader_file(const char *path)`
-          - `std::vector<uint8_t> data(size)`
-          - `std::vector<uint8_t> zeros(size, 0)`
-          - `void TerrainRenderer::init(SDL_GPUDevice *device, SDL_Window *window)`
+          - `static SDL_GPUComputePipeline *build_compute_pipeline(SDL_GPUDevice *device, const char *path, int num_uniform_buffers, int num_rw_storage_buffers, int num_ro_storage_buffers)`
+          - `static SDL_GPUBuffer *create_gpu_buffer(SDL_GPUDevice *device, uint32_t size, SDL_GPUBufferUsageFlags usage)`
+          - `static SDL_GPUBuffer *upload_to_gpu_buffer(SDL_GPUDevice *device, const void *data, uint32_t size, SDL_GPUBufferUsageFlags usage)`
+          - `static SDL_GPUBuffer *create_zeroed_gpu_buffer(SDL_GPUDevice *device, uint32_t size, SDL_GPUBufferUsageFlags usage)`
+          - `void TerrainRenderer::init(SDL_GPUDevice *device, SDL_Window *window, AssetManager &am)`
           - `void TerrainRenderer::init_graphics_pipelines(SDL_GPUDevice *device, SDL_Window *window)`
           - `void TerrainRenderer::init_compute_pipelines(SDL_GPUDevice *device)`
+          - `void TerrainRenderer::rebuild_dirty_pipelines(SDL_Window *window)`
           - `void TerrainRenderer::init_cluster_buffers(SDL_GPUDevice *device, uint32_t tilesX, uint32_t tilesY, uint32_t num_slices)`
           - `void TerrainRenderer::upload_mesh(SDL_GPUDevice *device, const TerrainMesh &mesh)`
           - `void TerrainRenderer::upload_lights(const std::vector<GpuPointLight> &lights)`
@@ -397,10 +445,13 @@
           - `void TerrainRenderer::release_cluster_buffers(SDL_GPUDevice *device)`
           - `void TerrainRenderer::cleanup(SDL_GPUDevice *device)`
         - terrain_renderer.h
-          - `public: void init(SDL_GPUDevice *device, SDL_Window *window)`
+          - `public: void init(SDL_GPUDevice *device, SDL_Window *window, AssetManager &am)`
           - `void upload_mesh(SDL_GPUDevice *device, const TerrainMesh &mesh)`
           - `void draw(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, uint32_t w, uint32_t h, const SceneUniforms &uniforms, const std::vector<GpuPointLight> &lights)`
           - `void rebuild_clusters_if_needed(SDL_GPUCommandBuffer *cmd, uint32_t w, uint32_t h, float tile_px, uint32_t num_slices, float near_plane, float far_plane)`
+          - `void rebuild_dirty_pipelines(SDL_Window *window)`
+          - `SDL_GPURenderPass *begin_render_pass(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, uint32_t w, uint32_t h)`
+          - `SDL_GPURenderPass *begin_render_pass_load(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, uint32_t w, uint32_t h)`
           - `void cleanup(SDL_GPUDevice *device)`
           - `bool is_initialized() const`
           - `bool has_mesh() const`
@@ -416,6 +467,7 @@
           - `void release_buffers(SDL_GPUDevice *device)`
           - `void release_cluster_buffers(SDL_GPUDevice *device)`
           - `void upload_lights(const std::vector<GpuPointLight> &lights)`
+          - `AssetManager *asset_manager` — field
         - util.h
           - `inline uint32_t hash2d(int x, int y)`
           - `inline uint32_t hash1d(int idx)`
