@@ -12,76 +12,40 @@
 
 
 
-static std::vector<uint8_t> load_shader_file(const char *path) {
+// Helper: build a compute pipeline from SPIR-V on disk (used by init and hot-swap).
+static SDL_GPUComputePipeline *build_compute_pipeline(SDL_GPUDevice *device,
+                                                       const char *path,
+                                                       int num_uniform_buffers,
+                                                       int num_rw_storage_buffers,
+                                                       int num_ro_storage_buffers = 0) {
+  SDL_Log("build_compute_pipeline: Loading %s", path);
   SDL_IOStream *io = SDL_IOFromFile(path, "rb");
   if (!io) {
-    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to open shader: %s", path);
-    return {};
-  }
-  Sint64 size = SDL_GetIOSize(io);
-  if (size <= 0) { SDL_CloseIO(io); return {}; }
-  std::vector<uint8_t> data(size);
-  SDL_ReadIO(io, data.data(), size);
-  SDL_CloseIO(io);
-  return data;
-}
-
-static SDL_GPUShader *create_shader(SDL_GPUDevice *device, const char *path,
-                                    SDL_GPUShaderStage stage,
-                                    int num_uniform_buffers,
-                                    int num_storage_buffers = 0) {
-  auto code = load_shader_file(path);
-  if (code.empty()) return nullptr;
-
-  SDL_GPUShaderCreateInfo info = {};
-  info.code                = code.data();
-  info.code_size           = code.size();
-  info.entrypoint          = "main";
-  info.format              = SDL_GPU_SHADERFORMAT_SPIRV;
-  info.stage               = stage;
-  info.num_uniform_buffers = (Uint32)num_uniform_buffers;
-  info.num_storage_buffers = (Uint32)num_storage_buffers;
-
-  SDL_GPUShader *shader = SDL_CreateGPUShader(device, &info);
-  if (!shader)
-    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                 "Failed to create shader from %s: %s", path, SDL_GetError());
-  return shader;
-}
-
-static SDL_GPUComputePipeline *create_compute_pipeline(SDL_GPUDevice *device,
-                                                        const char *path,
-                                                        int num_uniform_buffers,
-                                                        int num_rw_storage_buffers,
-                                                        int num_ro_storage_buffers = 0) {
-  SDL_Log("create_compute_pipeline: Loading %s", path);
-  auto code = load_shader_file(path);
-  if (code.empty()) {
-    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "create_compute_pipeline: Failed to load %s", path);
+    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "build_compute_pipeline: Failed to open %s", path);
     return nullptr;
   }
-
-  SDL_Log("create_compute_pipeline: %s loaded, size=%zu", path, code.size());
+  Sint64 size = SDL_GetIOSize(io);
+  if (size <= 0) { SDL_CloseIO(io); return nullptr; }
+  std::vector<uint8_t> code(size);
+  SDL_ReadIO(io, code.data(), size);
+  SDL_CloseIO(io);
 
   SDL_GPUComputePipelineCreateInfo info = {};
-  info.code                       = code.data();
-  info.code_size                  = code.size();
-  info.entrypoint                 = "main";
-  info.format                     = SDL_GPU_SHADERFORMAT_SPIRV;
-  info.num_uniform_buffers        = (Uint32)num_uniform_buffers;
+  info.code                          = code.data();
+  info.code_size                     = (size_t)size;
+  info.entrypoint                    = "main";
+  info.format                        = SDL_GPU_SHADERFORMAT_SPIRV;
+  info.num_uniform_buffers           = (Uint32)num_uniform_buffers;
   info.num_readwrite_storage_buffers = (Uint32)num_rw_storage_buffers;
   info.num_readonly_storage_buffers  = (Uint32)num_ro_storage_buffers;
-  info.threadcount_x              = 16;
-  info.threadcount_y              = 9;
-  info.threadcount_z              = 1;
+  info.threadcount_x                 = 16;
+  info.threadcount_y                 = 9;
+  info.threadcount_z                 = 1;
 
-  SDL_Log("create_compute_pipeline: Calling SDL_CreateGPUComputePipeline for %s", path);
   SDL_GPUComputePipeline *pipeline = SDL_CreateGPUComputePipeline(device, &info);
   if (!pipeline)
     SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                 "Failed to create compute pipeline from %s: %s", path, SDL_GetError());
-
-  SDL_Log("create_compute_pipeline: Success for %s", path);
+                 "build_compute_pipeline: Failed to create from %s: %s", path, SDL_GetError());
   return pipeline;
 }
 
@@ -140,13 +104,14 @@ static SDL_GPUBuffer *create_zeroed_gpu_buffer(SDL_GPUDevice *device, uint32_t s
 
 
 
-void TerrainRenderer::init(SDL_GPUDevice *device, SDL_Window *window) {
+void TerrainRenderer::init(SDL_GPUDevice *device, SDL_Window *window, AssetManager &am) {
   if (initialized) return;
   if (!device) {
     SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainRenderer::init called with NULL device!");
     return;
   }
-  gpu_device = device;
+  gpu_device    = device;
+  asset_manager = &am;
 
   if (SDL_GPUTextureSupportsFormat(device,
           SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT,
@@ -175,11 +140,11 @@ void TerrainRenderer::init_graphics_pipelines(SDL_GPUDevice *device, SDL_Window 
 
   {
 
-    SDL_GPUShader *vert = create_shader(
-        device, (shader_dir + "/terrain.vert.glsl.spv").c_str(),
+    SDL_GPUShader *vert = asset_manager->load_shader(
+        "terrain.vert", shader_dir + "/terrain.vert.glsl.spv",
         SDL_GPU_SHADERSTAGE_VERTEX, 1, 0);
-    SDL_GPUShader *frag = create_shader(
-        device, (shader_dir + "/terrain.frag.glsl.spv").c_str(),
+    SDL_GPUShader *frag = asset_manager->load_shader(
+        "terrain.frag", shader_dir + "/terrain.frag.glsl.spv",
         SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
 
     if (!vert || !frag) {
@@ -221,17 +186,18 @@ void TerrainRenderer::init_graphics_pipelines(SDL_GPUDevice *device, SDL_Window 
     terrain_pipeline = SDL_CreateGPUGraphicsPipeline(device, &pi);
     terrain_stencil_pipeline = nullptr;
 
-    SDL_ReleaseGPUShader(device, vert);
-    SDL_ReleaseGPUShader(device, frag);
+    asset_manager->register_pipeline("terrain",         "terrain.vert", "terrain.frag");
+    asset_manager->register_pipeline("terrain_stencil", "terrain.vert", "terrain.frag");
+    // Shaders are owned by the asset manager; do NOT release them here.
   }
 
 
   {
-    SDL_GPUShader *vert = create_shader(
-        device, (shader_dir + "/lava.vert.glsl.spv").c_str(),
+    SDL_GPUShader *vert = asset_manager->load_shader(
+        "lava.vert", shader_dir + "/lava.vert.glsl.spv",
         SDL_GPU_SHADERSTAGE_VERTEX, 1, 0);
-    SDL_GPUShader *frag = create_shader(
-        device, (shader_dir + "/lava.frag.glsl.spv").c_str(),
+    SDL_GPUShader *frag = asset_manager->load_shader(
+        "lava.frag", shader_dir + "/lava.frag.glsl.spv",
         SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
 
     if (vert && frag) {
@@ -265,18 +231,18 @@ void TerrainRenderer::init_graphics_pipelines(SDL_GPUDevice *device, SDL_Window 
       pi.depth_stencil_state.enable_stencil_test       = false;
 
       lava_pipeline = SDL_CreateGPUGraphicsPipeline(device, &pi);
+      asset_manager->register_pipeline("lava", "lava.vert", "lava.frag");
     }
-    if (vert) SDL_ReleaseGPUShader(device, vert);
-    if (frag) SDL_ReleaseGPUShader(device, frag);
+    // Shaders owned by asset_manager.
   }
 
 
   {
-    SDL_GPUShader *vert = create_shader(
-        device, (shader_dir + "/contour.vert.glsl.spv").c_str(),
+    SDL_GPUShader *vert = asset_manager->load_shader(
+        "contour.vert", shader_dir + "/contour.vert.glsl.spv",
         SDL_GPU_SHADERSTAGE_VERTEX, 1, 0);
-    SDL_GPUShader *frag = create_shader(
-        device, (shader_dir + "/contour.frag.glsl.spv").c_str(),
+    SDL_GPUShader *frag = asset_manager->load_shader(
+        "contour.frag", shader_dir + "/contour.frag.glsl.spv",
         SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
 
     if (vert && frag) {
@@ -315,9 +281,9 @@ void TerrainRenderer::init_graphics_pipelines(SDL_GPUDevice *device, SDL_Window 
       pi.depth_stencil_state.enable_depth_write        = false;
 
       contour_pipeline = SDL_CreateGPUGraphicsPipeline(device, &pi);
+      asset_manager->register_pipeline("contour", "contour.vert", "contour.frag");
     }
-    if (vert) SDL_ReleaseGPUShader(device, vert);
-    if (frag) SDL_ReleaseGPUShader(device, frag);
+    // Shaders owned by asset_manager.
   }
 
   SDL_Log("TerrainRenderer: Graphics pipelines created");
@@ -330,25 +296,19 @@ void TerrainRenderer::init_compute_pipelines(SDL_GPUDevice *device) {
   std::string shader_dir = SHADER_DIR;
   SDL_Log("TerrainRenderer: Loading compute shaders from %s", shader_dir.c_str());
 
-
   std::string gen_path = shader_dir + "/generate_clusters.comp.glsl.spv";
-  SDL_Log("TerrainRenderer: Creating cluster_gen_pipeline from %s", gen_path.c_str());
-  cluster_gen_pipeline = create_compute_pipeline(
-      device,
-      gen_path.c_str(),
-      1,
-      1,
-      0);
+  asset_manager->load_compute_shader("generate_clusters.comp", gen_path, 1, 1, 0);
+  asset_manager->register_compute_pipeline("cluster_gen", "generate_clusters.comp");
 
+  SDL_Log("TerrainRenderer: Creating cluster_gen_pipeline from %s", gen_path.c_str());
+  cluster_gen_pipeline = build_compute_pipeline(device, gen_path.c_str(), 1, 1, 0);
 
   std::string cull_path = shader_dir + "/light_culling.comp.glsl.spv";
+  asset_manager->load_compute_shader("light_culling.comp", cull_path, 2, 5, 0);
+  asset_manager->register_compute_pipeline("light_culling", "light_culling.comp");
+
   SDL_Log("TerrainRenderer: Creating light_culling_pipeline from %s", cull_path.c_str());
-  light_culling_pipeline = create_compute_pipeline(
-      device,
-      cull_path.c_str(),
-      2,
-      5,
-      0);
+  light_culling_pipeline = build_compute_pipeline(device, cull_path.c_str(), 2, 5, 0);
 
   if (cluster_gen_pipeline && light_culling_pipeline)
     SDL_Log("TerrainRenderer: Compute pipelines created");
@@ -359,6 +319,121 @@ void TerrainRenderer::init_compute_pipelines(SDL_GPUDevice *device) {
 
 
 
+
+void TerrainRenderer::rebuild_dirty_pipelines(SDL_Window *window) {
+  if (!asset_manager || !gpu_device) return;
+
+  std::string shader_dir = SHADER_DIR;
+  SDL_GPUTextureFormat swapchain_format =
+      SDL_GetGPUSwapchainTextureFormat(gpu_device, window);
+
+  auto rebuild_graphics = [&](const std::string &key,
+                               SDL_GPUGraphicsPipeline *&pipeline_out,
+                               auto pipeline_builder) {
+    if (asset_manager->pipeline_needs_rebuild(key)) {
+      SDL_WaitForGPUIdle(gpu_device);
+      if (pipeline_out) { SDL_ReleaseGPUGraphicsPipeline(gpu_device, pipeline_out); pipeline_out = nullptr; }
+      pipeline_out = pipeline_builder();
+      asset_manager->clear_rebuild_flag(key);
+      SDL_Log("TerrainRenderer: Rebuilt pipeline '%s'", key.c_str());
+    }
+  };
+
+  rebuild_graphics("terrain", terrain_pipeline, [&]() -> SDL_GPUGraphicsPipeline * {
+    SDL_GPUShader *vert = asset_manager->load_shader("terrain.vert", shader_dir + "/terrain.vert.glsl.spv", SDL_GPU_SHADERSTAGE_VERTEX, 1, 0);
+    SDL_GPUShader *frag = asset_manager->load_shader("terrain.frag", shader_dir + "/terrain.frag.glsl.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+    if (!vert || !frag) return nullptr;
+    SDL_GPUVertexBufferDescription vbuf_desc = {};
+    vbuf_desc.slot = 0; vbuf_desc.pitch = sizeof(BasaltVertex); vbuf_desc.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+    SDL_GPUVertexAttribute attrs[4] = {};
+    attrs[0] = { 0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, (Uint32)offsetof(BasaltVertex, pos_x)   };
+    attrs[1] = { 1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, (Uint32)offsetof(BasaltVertex, color_r) };
+    attrs[2] = { 2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT,  (Uint32)offsetof(BasaltVertex, sheen)   };
+    attrs[3] = { 3, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, (Uint32)offsetof(BasaltVertex, nx)      };
+    SDL_GPUColorTargetDescription cd = {}; cd.format = swapchain_format;
+    SDL_GPUGraphicsPipelineCreateInfo pi = {};
+    pi.vertex_shader = vert; pi.fragment_shader = frag;
+    pi.vertex_input_state.vertex_buffer_descriptions = &vbuf_desc; pi.vertex_input_state.num_vertex_buffers = 1;
+    pi.vertex_input_state.vertex_attributes = attrs; pi.vertex_input_state.num_vertex_attributes = 4;
+    pi.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    pi.target_info.color_target_descriptions = &cd; pi.target_info.num_color_targets = 1;
+    pi.target_info.has_depth_stencil_target = true; pi.target_info.depth_stencil_format = depth_stencil_format;
+    pi.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+    pi.depth_stencil_state.enable_depth_test = true; pi.depth_stencil_state.enable_depth_write = true;
+    return SDL_CreateGPUGraphicsPipeline(gpu_device, &pi);
+  });
+  // terrain_stencil shares the same shader keys — clear its flag too
+  if (asset_manager->pipeline_needs_rebuild("terrain_stencil"))
+    asset_manager->clear_rebuild_flag("terrain_stencil");
+
+  rebuild_graphics("lava", lava_pipeline, [&]() -> SDL_GPUGraphicsPipeline * {
+    SDL_GPUShader *vert = asset_manager->load_shader("lava.vert", shader_dir + "/lava.vert.glsl.spv", SDL_GPU_SHADERSTAGE_VERTEX, 1, 0);
+    SDL_GPUShader *frag = asset_manager->load_shader("lava.frag", shader_dir + "/lava.frag.glsl.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
+    if (!vert || !frag) return nullptr;
+    SDL_GPUVertexBufferDescription vbuf_desc = {};
+    vbuf_desc.slot = 0; vbuf_desc.pitch = sizeof(GpuLavaVertex); vbuf_desc.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+    SDL_GPUVertexAttribute attrs[2] = {};
+    attrs[0] = { 0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, (Uint32)offsetof(GpuLavaVertex, pos_x)       };
+    attrs[1] = { 1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT,  (Uint32)offsetof(GpuLavaVertex, time_offset) };
+    SDL_GPUColorTargetDescription cd = {}; cd.format = swapchain_format;
+    SDL_GPUGraphicsPipelineCreateInfo pi = {};
+    pi.vertex_shader = vert; pi.fragment_shader = frag;
+    pi.vertex_input_state.vertex_buffer_descriptions = &vbuf_desc; pi.vertex_input_state.num_vertex_buffers = 1;
+    pi.vertex_input_state.vertex_attributes = attrs; pi.vertex_input_state.num_vertex_attributes = 2;
+    pi.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    pi.target_info.color_target_descriptions = &cd; pi.target_info.num_color_targets = 1;
+    pi.target_info.has_depth_stencil_target = true; pi.target_info.depth_stencil_format = depth_stencil_format;
+    pi.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+    pi.depth_stencil_state.enable_depth_test = true; pi.depth_stencil_state.enable_depth_write = true;
+    return SDL_CreateGPUGraphicsPipeline(gpu_device, &pi);
+  });
+
+  rebuild_graphics("contour", contour_pipeline, [&]() -> SDL_GPUGraphicsPipeline * {
+    SDL_GPUShader *vert = asset_manager->load_shader("contour.vert", shader_dir + "/contour.vert.glsl.spv", SDL_GPU_SHADERSTAGE_VERTEX, 1, 0);
+    SDL_GPUShader *frag = asset_manager->load_shader("contour.frag", shader_dir + "/contour.frag.glsl.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
+    if (!vert || !frag) return nullptr;
+    SDL_GPUVertexBufferDescription vbuf_desc = {};
+    vbuf_desc.slot = 0; vbuf_desc.pitch = sizeof(ContourVertex); vbuf_desc.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+    SDL_GPUVertexAttribute attrs[1] = {};
+    attrs[0] = { 0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, 0 };
+    SDL_GPUColorTargetDescription cd = {}; cd.format = swapchain_format;
+    cd.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+    cd.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    cd.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+    cd.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+    cd.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    cd.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+    cd.blend_state.enable_blend = true;
+    SDL_GPUGraphicsPipelineCreateInfo pi = {};
+    pi.vertex_shader = vert; pi.fragment_shader = frag;
+    pi.vertex_input_state.vertex_buffer_descriptions = &vbuf_desc; pi.vertex_input_state.num_vertex_buffers = 1;
+    pi.vertex_input_state.vertex_attributes = attrs; pi.vertex_input_state.num_vertex_attributes = 1;
+    pi.primitive_type = SDL_GPU_PRIMITIVETYPE_LINELIST;
+    pi.target_info.color_target_descriptions = &cd; pi.target_info.num_color_targets = 1;
+    pi.target_info.has_depth_stencil_target = true; pi.target_info.depth_stencil_format = depth_stencil_format;
+    pi.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_ALWAYS;
+    pi.depth_stencil_state.enable_depth_test = false; pi.depth_stencil_state.enable_depth_write = false;
+    return SDL_CreateGPUGraphicsPipeline(gpu_device, &pi);
+  });
+
+  // Compute pipelines
+  if (asset_manager->pipeline_needs_rebuild("cluster_gen")) {
+    SDL_WaitForGPUIdle(gpu_device);
+    if (cluster_gen_pipeline) { SDL_ReleaseGPUComputePipeline(gpu_device, cluster_gen_pipeline); cluster_gen_pipeline = nullptr; }
+    std::string gen_path = shader_dir + "/generate_clusters.comp.glsl.spv";
+    cluster_gen_pipeline = build_compute_pipeline(gpu_device, gen_path.c_str(), 1, 1, 0);
+    asset_manager->clear_rebuild_flag("cluster_gen");
+    SDL_Log("TerrainRenderer: Rebuilt pipeline 'cluster_gen'");
+  }
+  if (asset_manager->pipeline_needs_rebuild("light_culling")) {
+    SDL_WaitForGPUIdle(gpu_device);
+    if (light_culling_pipeline) { SDL_ReleaseGPUComputePipeline(gpu_device, light_culling_pipeline); light_culling_pipeline = nullptr; }
+    std::string cull_path = shader_dir + "/light_culling.comp.glsl.spv";
+    light_culling_pipeline = build_compute_pipeline(gpu_device, cull_path.c_str(), 2, 5, 0);
+    asset_manager->clear_rebuild_flag("light_culling");
+    SDL_Log("TerrainRenderer: Rebuilt pipeline 'light_culling'");
+  }
+}
 
 void TerrainRenderer::init_cluster_buffers(SDL_GPUDevice *device,
                                             uint32_t tilesX, uint32_t tilesY,
@@ -409,6 +484,14 @@ void TerrainRenderer::init_cluster_buffers(SDL_GPUDevice *device,
   cluster_grid_w = tilesX;
   cluster_grid_y = tilesY;
 
+  if (asset_manager) {
+    asset_manager->register_buffer("point_light_ssbo",  point_light_ssbo);
+    asset_manager->register_buffer("cluster_aabb_ssbo", cluster_aabb_ssbo);
+    asset_manager->register_buffer("light_grid_ssbo",   light_grid_ssbo);
+    asset_manager->register_buffer("global_index_ssbo", global_index_ssbo);
+    asset_manager->register_buffer("cull_counter_ssbo", cull_counter_ssbo);
+  }
+
   SDL_Log("TerrainRenderer: Cluster buffers created (%u×%u×%u clusters)",
           tilesX, tilesY, num_slices);
 }
@@ -455,6 +538,10 @@ void TerrainRenderer::upload_mesh(SDL_GPUDevice *device, const TerrainMesh &mesh
           device, all_indices.data(),
           (uint32_t)(all_indices.size() * sizeof(uint32_t)),
           SDL_GPU_BUFFERUSAGE_INDEX);
+      if (asset_manager) {
+        asset_manager->register_buffer("basalt_vbo", basalt_vbo);
+        asset_manager->register_buffer("basalt_ibo", basalt_ibo);
+      }
     }
   }
 
@@ -465,6 +552,7 @@ void TerrainRenderer::upload_mesh(SDL_GPUDevice *device, const TerrainMesh &mesh
         (uint32_t)(mesh.lava_vertices.size() * sizeof(GpuLavaVertex)),
         SDL_GPU_BUFFERUSAGE_VERTEX);
     lava_vertex_count = (uint32_t)mesh.lava_vertices.size();
+    if (asset_manager) asset_manager->register_buffer("lava_vbo", lava_vbo);
 
     if (!mesh.lava_indices.empty()) {
       lava_ibo = upload_to_gpu_buffer(
@@ -472,6 +560,7 @@ void TerrainRenderer::upload_mesh(SDL_GPUDevice *device, const TerrainMesh &mesh
           (uint32_t)(mesh.lava_indices.size() * sizeof(uint32_t)),
           SDL_GPU_BUFFERUSAGE_INDEX);
       lava_index_count = (uint32_t)mesh.lava_indices.size();
+      if (asset_manager) asset_manager->register_buffer("lava_ibo", lava_ibo);
     }
   }
 
@@ -482,6 +571,7 @@ void TerrainRenderer::upload_mesh(SDL_GPUDevice *device, const TerrainMesh &mesh
         (uint32_t)(mesh.contour_vertices.size() * sizeof(ContourVertex)),
         SDL_GPU_BUFFERUSAGE_VERTEX);
     contour_vertex_count = (uint32_t)mesh.contour_vertices.size();
+    if (asset_manager) asset_manager->register_buffer("contour_vbo", contour_vbo);
   }
 
   has_data = true;
@@ -846,12 +936,18 @@ SDL_GPURenderPass *TerrainRenderer::begin_render_pass_load(SDL_GPUCommandBuffer 
 
 
 void TerrainRenderer::release_buffers(SDL_GPUDevice *device) {
-  if (basalt_vbo) { SDL_ReleaseGPUBuffer(device, basalt_vbo); basalt_vbo = nullptr; }
-  if (basalt_ibo) { SDL_ReleaseGPUBuffer(device, basalt_ibo); basalt_ibo = nullptr; }
-  if (lava_vbo)   { SDL_ReleaseGPUBuffer(device, lava_vbo);   lava_vbo   = nullptr; }
-  if (lava_ibo)   { SDL_ReleaseGPUBuffer(device, lava_ibo);   lava_ibo   = nullptr; }
-  if (void_vbo)   { SDL_ReleaseGPUBuffer(device, void_vbo);   void_vbo   = nullptr; }
-  if (contour_vbo){ SDL_ReleaseGPUBuffer(device, contour_vbo);contour_vbo = nullptr; }
+  auto rel = [&](SDL_GPUBuffer *&buf, const char *key) {
+    if (!buf) return;
+    if (asset_manager) { asset_manager->release_buffer(key); }
+    else               { SDL_ReleaseGPUBuffer(device, buf); }
+    buf = nullptr;
+  };
+  rel(basalt_vbo,  "basalt_vbo");
+  rel(basalt_ibo,  "basalt_ibo");
+  rel(lava_vbo,    "lava_vbo");
+  rel(lava_ibo,    "lava_ibo");
+  rel(contour_vbo, "contour_vbo");
+  if (void_vbo) { SDL_ReleaseGPUBuffer(device, void_vbo); void_vbo = nullptr; }
   has_data = false;
 }
 
@@ -879,6 +975,7 @@ void TerrainRenderer::cleanup(SDL_GPUDevice *device) {
   if (contour_pipeline)         { SDL_ReleaseGPUGraphicsPipeline(device, contour_pipeline);            contour_pipeline         = nullptr; }
   if (cluster_gen_pipeline)     { SDL_ReleaseGPUComputePipeline(device, cluster_gen_pipeline);         cluster_gen_pipeline     = nullptr; }
   if (light_culling_pipeline)   { SDL_ReleaseGPUComputePipeline(device, light_culling_pipeline);       light_culling_pipeline   = nullptr; }
+  // Shaders are owned by AssetManager and released via asset_manager.clear().
 
   initialized = false;
   SDL_Log("TerrainRenderer: Cleaned up");

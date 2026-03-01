@@ -1,12 +1,14 @@
 #pragma once
 #include "terrain/terrain_mesh.h"
+#include "core/asset_manager.h"
 #include <SDL3/SDL.h>
 #include <vector>
 
 class TerrainRenderer {
 public:
-  void init(SDL_GPUDevice *device, SDL_Window *window);
+  void init(SDL_GPUDevice *device, SDL_Window *window, AssetManager &am);
   void upload_mesh(SDL_GPUDevice *device, const TerrainMesh &mesh);
+  void rebuild_dirty_pipelines(SDL_Window *window);
 
 
 
@@ -109,6 +111,7 @@ private:
 
   SDL_GPUTransferBuffer *counter_reset_transfer = nullptr;
 
+  AssetManager *asset_manager = nullptr;
 
   uint32_t cluster_grid_w = 0;
   uint32_t cluster_grid_y = 0;

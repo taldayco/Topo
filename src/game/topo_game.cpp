@@ -159,11 +159,17 @@ void TopoGame::on_render_tool(GpuContext &gpu, FrameContext &frame, flecs::world
 
 void TopoGame::on_render_game(GpuContext &gpu, FrameContext &frame, flecs::world &ecs) {
   if (!terrain_renderer.is_initialized()) {
-    terrain_renderer.init(gpu.device, gpu.game_window);
+    terrain_renderer.init(gpu.device, gpu.game_window, asset_manager);
     background_renderer.init(gpu.device,
                              SDL_GetGPUSwapchainTextureFormat(gpu.device, gpu.game_window),
-                             terrain_renderer.get_depth_format());
+                             terrain_renderer.get_depth_format(),
+                             asset_manager);
   }
+
+  terrain_renderer.rebuild_dirty_pipelines(gpu.game_window);
+  background_renderer.rebuild_if_dirty(
+      SDL_GetGPUSwapchainTextureFormat(gpu.device, gpu.game_window),
+      terrain_renderer.get_depth_format());
 
   auto *ts       = ecs.get_mut<TerrainState>();
   auto *elev     = ecs.get_mut<ElevationParams>();
@@ -401,6 +407,11 @@ void TopoGame::render_ui(flecs::world &ecs, bool game_window_open) {
   ImGui::Text("Contour Lines: %zu", contours ? contours->contour_lines.size() : 0u);
   ImGui::Text("Resolution: %dx%d", Config::MAP_WIDTH, Config::MAP_HEIGHT);
   ImGui::Text("Camera: (%.1f, %.1f) zoom %.2fx", camera.world_x, camera.world_y, camera.zoom);
+
+  ImGui::Separator();
+  if (ImGui::CollapsingHeader("Resources")) {
+    asset_manager.render_debug_ui();
+  }
 
   ImGui::End();
   ui_end_frame();

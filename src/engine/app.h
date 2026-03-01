@@ -1,6 +1,7 @@
 #pragma once
 #include "gpu/gpu.h"
 #include "ui/imgui_ui.h"
+#include "core/asset_manager.h"
 #include <SDL3/SDL.h>
 #include <flecs.h>
 
@@ -27,5 +28,6 @@ public:
 protected:
   GpuContext gpu_ctx;
   flecs::world ecs_world;
+  AssetManager asset_manager;
   bool running = true;
 };
