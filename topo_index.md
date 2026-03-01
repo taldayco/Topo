@@ -10,13 +10,14 @@ IMORTANT:
   - src/
     - engine/
       - app.cpp
-        - `int Application::run()`
+        - `int Application::run()` — calls `on_pre_frame_game` before `gpu_acquire_game_frame` each game frame
       - app.h
         - `int run()`
         - `virtual void on_init(GpuContext &gpu, flecs::world &ecs)`
         - `virtual void on_event(const SDL_Event &event, flecs::world &ecs)`
         - `virtual void on_render_tool(GpuContext &gpu, FrameContext &frame, flecs::world &ecs)`
         - `virtual void on_render_game(GpuContext &gpu, FrameContext &frame, flecs::world &ecs)`
+        - `virtual void on_pre_frame_game(GpuContext &gpu, flecs::world &ecs)` — default no-op; called before `gpu_acquire_game_frame`; safe to call `SDL_WaitForGPUIdle` here (no frame cmd buffer open)
         - `virtual void on_cleanup(flecs::world &ecs)`
         - `virtual bool wants_game_window_open(flecs::world &ecs)`
         - `virtual bool wants_game_window_close(flecs::world &ecs)`
@@ -195,7 +196,8 @@ IMORTANT:
         - `void TopoGame::on_init(GpuContext &gpu, flecs::world &ecs)` — calls task_system.init(1)
         - `void TopoGame::on_event(const SDL_Event &event, flecs::world &ecs)`
         - `void TopoGame::on_render_tool(GpuContext &gpu, FrameContext &frame, flecs::world &ecs)`
-        - `void TopoGame::on_render_game(GpuContext &gpu, FrameContext &frame, flecs::world &ecs)` — async regen: kicks worker via task_system.enqueue; polls async_terrain for completed results; calls terrain_renderer.draw(..., gpu.upload_manager)
+        - `void TopoGame::on_pre_frame_game(GpuContext &gpu, flecs::world &ecs)` — called before gpu_acquire_game_frame; if ready_mesh_pending is set and terrain_renderer is initialized, calls terrain_renderer.upload_mesh (safe: no frame cmd buffer open), swaps ECS MapData/ContourData, frees old data on worker thread, clears ready_*_pending fields
+        - `void TopoGame::on_render_game(GpuContext &gpu, FrameContext &frame, flecs::world &ecs)` — async regen: kicks worker via task_system.enqueue; polls async_terrain and moves completed results into ready_mesh_pending/ready_map_pending/ready_contours_pending (does NOT call upload_mesh here); calls terrain_renderer.draw(..., gpu.upload_manager)
         - `void TopoGame::on_cleanup(flecs::world &ecs)` — calls task_system.shutdown() before terrain_renderer.cleanup()
         - `bool TopoGame::wants_game_window_open(flecs::world &ecs)`
         - `bool TopoGame::wants_game_window_close(flecs::world &ecs)`
@@ -205,6 +207,9 @@ IMORTANT:
       - topo_game.h
         - `TaskSystem task_system` — member; init(1) in on_init, shutdown() in on_cleanup before terrain_renderer.cleanup()
         - `AsyncTerrainState async_terrain` — member; holds is_generating, pending_mesh/map/contours, pending_mtx
+        - `std::shared_ptr<TerrainMesh> ready_mesh_pending` — private; set in on_render_game when async results arrive, consumed in on_pre_frame_game
+        - `std::shared_ptr<MapData> ready_map_pending` — private; same lifecycle as ready_mesh_pending
+        - `std::shared_ptr<ContourData> ready_contours_pending` — private; same lifecycle as ready_mesh_pending
         - `private: void render_ui(flecs::world &ecs, bool game_window_open)`
       - terrain/
         - FastNoiseLite.h
