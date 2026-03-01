@@ -1,4 +1,5 @@
 #include "terrain/terrain_renderer.h"
+#include "gpu/gpu.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
 #include <cstring>
@@ -49,57 +50,7 @@ static SDL_GPUComputePipeline *build_compute_pipeline(SDL_GPUDevice *device,
   return pipeline;
 }
 
-static SDL_GPUBuffer *create_gpu_buffer(SDL_GPUDevice *device, uint32_t size,
-                                         SDL_GPUBufferUsageFlags usage) {
-  SDL_GPUBufferCreateInfo info = {};
-  info.usage = usage;
-  info.size  = size;
-  SDL_GPUBuffer *buf = SDL_CreateGPUBuffer(device, &info);
-  if (!buf)
-    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                 "Failed to create GPU buffer (size=%u): %s", size, SDL_GetError());
-  return buf;
-}
 
-static SDL_GPUBuffer *upload_to_gpu_buffer(SDL_GPUDevice *device,
-                                            const void *data, uint32_t size,
-                                            SDL_GPUBufferUsageFlags usage) {
-  SDL_GPUBuffer *buffer = create_gpu_buffer(device, size, usage);
-  if (!buffer) return nullptr;
-
-  SDL_GPUTransferBufferCreateInfo ti = {};
-  ti.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-  ti.size  = size;
-  SDL_GPUTransferBuffer *transfer = SDL_CreateGPUTransferBuffer(device, &ti);
-  if (!transfer) { SDL_ReleaseGPUBuffer(device, buffer); return nullptr; }
-
-  void *mapped = SDL_MapGPUTransferBuffer(device, transfer, false);
-  if (!mapped) {
-    SDL_ReleaseGPUTransferBuffer(device, transfer);
-    SDL_ReleaseGPUBuffer(device, buffer);
-    return nullptr;
-  }
-  SDL_memcpy(mapped, data, size);
-  SDL_UnmapGPUTransferBuffer(device, transfer);
-
-  SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(device);
-  SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(cmd);
-  SDL_GPUTransferBufferLocation src = { transfer, 0 };
-  SDL_GPUBufferRegion           dst = { buffer,   0, size };
-  SDL_UploadToGPUBuffer(copy, &src, &dst, false);
-  SDL_EndGPUCopyPass(copy);
-  SDL_SubmitGPUCommandBuffer(cmd);
-  SDL_WaitForGPUIdle(device);
-  SDL_ReleaseGPUTransferBuffer(device, transfer);
-  return buffer;
-}
-
-
-static SDL_GPUBuffer *create_zeroed_gpu_buffer(SDL_GPUDevice *device, uint32_t size,
-                                                SDL_GPUBufferUsageFlags usage) {
-  std::vector<uint8_t> zeros(size, 0);
-  return upload_to_gpu_buffer(device, zeros.data(), size, usage);
-}
 
 
 
@@ -145,7 +96,7 @@ void TerrainRenderer::init_graphics_pipelines(SDL_GPUDevice *device, SDL_Window 
         SDL_GPU_SHADERSTAGE_VERTEX, 1, 0);
     SDL_GPUShader *frag = asset_manager->load_shader(
         "terrain.frag", shader_dir + "/terrain.frag.glsl.spv",
-        SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+        SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 3);
 
     if (!vert || !frag) {
       if (vert) SDL_ReleaseGPUShader(device, vert);
@@ -341,7 +292,7 @@ void TerrainRenderer::rebuild_dirty_pipelines(SDL_Window *window) {
 
   rebuild_graphics("terrain", terrain_pipeline, [&]() -> SDL_GPUGraphicsPipeline * {
     SDL_GPUShader *vert = asset_manager->load_shader("terrain.vert", shader_dir + "/terrain.vert.glsl.spv", SDL_GPU_SHADERSTAGE_VERTEX, 1, 0);
-    SDL_GPUShader *frag = asset_manager->load_shader("terrain.frag", shader_dir + "/terrain.frag.glsl.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+    SDL_GPUShader *frag = asset_manager->load_shader("terrain.frag", shader_dir + "/terrain.frag.glsl.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 3);
     if (!vert || !frag) return nullptr;
     SDL_GPUVertexBufferDescription vbuf_desc = {};
     vbuf_desc.slot = 0; vbuf_desc.pitch = sizeof(BasaltVertex); vbuf_desc.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
@@ -443,7 +394,7 @@ void TerrainRenderer::init_cluster_buffers(SDL_GPUDevice *device,
   uint32_t num_clusters = tilesX * tilesY * num_slices;
 
 
-  cluster_aabb_ssbo = create_gpu_buffer(
+  cluster_aabb_ssbo = gpu_create_buffer(
       device,
       num_clusters * 32,
       SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ |
@@ -451,7 +402,7 @@ void TerrainRenderer::init_cluster_buffers(SDL_GPUDevice *device,
 
 
 
-  light_grid_ssbo = create_zeroed_gpu_buffer(
+  light_grid_ssbo = gpu_create_zeroed_buffer(
       device,
       num_clusters * 8,
       SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ |
@@ -459,7 +410,7 @@ void TerrainRenderer::init_cluster_buffers(SDL_GPUDevice *device,
       SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ);
 
 
-  global_index_ssbo = create_gpu_buffer(
+  global_index_ssbo = gpu_create_buffer(
       device,
       MAX_LIGHT_INDICES * sizeof(uint32_t),
       SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ |
@@ -467,14 +418,14 @@ void TerrainRenderer::init_cluster_buffers(SDL_GPUDevice *device,
       SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ);
 
 
-  cull_counter_ssbo = create_zeroed_gpu_buffer(
+  cull_counter_ssbo = gpu_create_zeroed_buffer(
       device,
       sizeof(uint32_t),
       SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ |
       SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE);
 
 
-  point_light_ssbo = create_gpu_buffer(
+  point_light_ssbo = gpu_create_buffer(
       device,
       MAX_LIGHTS * sizeof(GpuPointLight),
       SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ |
@@ -500,121 +451,190 @@ void TerrainRenderer::init_cluster_buffers(SDL_GPUDevice *device,
 
 
 void TerrainRenderer::upload_mesh(SDL_GPUDevice *device, const TerrainMesh &mesh) {
+  // One GPU idle wait to ensure old buffers are no longer in use, then release them.
   SDL_WaitForGPUIdle(device);
   release_buffers(device);
 
+  // --- Gather all CPU data first so we can size transfer buffers exactly ---
 
-  {
-    std::vector<BasaltVertex> all_verts;
-    std::vector<uint32_t>     all_indices;
-    basalt_side_index_count  = 0;
-    basalt_total_index_count = 0;
+  std::vector<BasaltVertex> all_verts;
+  std::vector<uint32_t>     all_indices;
+  basalt_side_index_count  = 0;
+  basalt_total_index_count = 0;
 
-    if (!mesh.basalt_layers.empty() && !mesh.basalt_layers[0].vertices.empty()) {
-      uint32_t vo = (uint32_t)all_verts.size();
-      all_verts.insert(all_verts.end(),
-                       mesh.basalt_layers[0].vertices.begin(),
-                       mesh.basalt_layers[0].vertices.end());
-      for (uint32_t idx : mesh.basalt_layers[0].indices)
-        all_indices.push_back(idx + vo);
-      basalt_side_index_count = (uint32_t)mesh.basalt_layers[0].indices.size();
-    }
-    if (mesh.basalt_layers.size() > 1 && !mesh.basalt_layers[1].vertices.empty()) {
-      uint32_t vo = (uint32_t)all_verts.size();
-      all_verts.insert(all_verts.end(),
-                       mesh.basalt_layers[1].vertices.begin(),
-                       mesh.basalt_layers[1].vertices.end());
-      for (uint32_t idx : mesh.basalt_layers[1].indices)
-        all_indices.push_back(idx + vo);
-    }
-    basalt_total_index_count = (uint32_t)all_indices.size();
+  if (!mesh.basalt_layers.empty() && !mesh.basalt_layers[0].vertices.empty()) {
+    uint32_t vo = (uint32_t)all_verts.size();
+    all_verts.insert(all_verts.end(),
+                     mesh.basalt_layers[0].vertices.begin(),
+                     mesh.basalt_layers[0].vertices.end());
+    for (uint32_t idx : mesh.basalt_layers[0].indices)
+      all_indices.push_back(idx + vo);
+    basalt_side_index_count = (uint32_t)mesh.basalt_layers[0].indices.size();
+  }
+  if (mesh.basalt_layers.size() > 1 && !mesh.basalt_layers[1].vertices.empty()) {
+    uint32_t vo = (uint32_t)all_verts.size();
+    all_verts.insert(all_verts.end(),
+                     mesh.basalt_layers[1].vertices.begin(),
+                     mesh.basalt_layers[1].vertices.end());
+    for (uint32_t idx : mesh.basalt_layers[1].indices)
+      all_indices.push_back(idx + vo);
+  }
+  basalt_total_index_count = (uint32_t)all_indices.size();
 
-    if (!all_verts.empty() && !all_indices.empty()) {
-      basalt_vbo = upload_to_gpu_buffer(
-          device, all_verts.data(),
-          (uint32_t)(all_verts.size() * sizeof(BasaltVertex)),
-          SDL_GPU_BUFFERUSAGE_VERTEX);
-      basalt_ibo = upload_to_gpu_buffer(
-          device, all_indices.data(),
-          (uint32_t)(all_indices.size() * sizeof(uint32_t)),
-          SDL_GPU_BUFFERUSAGE_INDEX);
-      if (asset_manager) {
-        asset_manager->register_buffer("basalt_vbo", basalt_vbo);
-        asset_manager->register_buffer("basalt_ibo", basalt_ibo);
-      }
-    }
+  // --- Compute total staging size and create one shared transfer buffer ---
+
+  uint32_t basalt_vbo_sz    = (uint32_t)(all_verts.size()                    * sizeof(BasaltVertex));
+  uint32_t basalt_ibo_sz    = (uint32_t)(all_indices.size()                  * sizeof(uint32_t));
+  uint32_t lava_vbo_sz      = (uint32_t)(mesh.lava_vertices.size()           * sizeof(GpuLavaVertex));
+  uint32_t lava_ibo_sz      = (uint32_t)(mesh.lava_indices.size()            * sizeof(uint32_t));
+  uint32_t contour_vbo_sz   = (uint32_t)(mesh.contour_vertices.size()        * sizeof(ContourVertex));
+
+  // Align each section to 4 bytes so GPU buffer offsets are valid.
+  auto align4 = [](uint32_t v) { return (v + 3u) & ~3u; };
+
+  uint32_t off_basalt_vbo  = 0;
+  uint32_t off_basalt_ibo  = off_basalt_vbo  + align4(basalt_vbo_sz);
+  uint32_t off_lava_vbo    = off_basalt_ibo  + align4(basalt_ibo_sz);
+  uint32_t off_lava_ibo    = off_lava_vbo    + align4(lava_vbo_sz);
+  uint32_t off_contour_vbo = off_lava_ibo    + align4(lava_ibo_sz);
+  uint32_t total_sz        = off_contour_vbo + align4(contour_vbo_sz);
+
+  if (total_sz == 0) {
+    has_data = false;
+    return;
   }
 
+  SDL_GPUTransferBufferCreateInfo ti = {};
+  ti.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+  ti.size  = total_sz;
+  SDL_GPUTransferBuffer *transfer = SDL_CreateGPUTransferBuffer(device, &ti);
+  if (!transfer) {
+    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                 "TerrainRenderer::upload_mesh: Failed to create transfer buffer (%u bytes): %s",
+                 total_sz, SDL_GetError());
+    return;
+  }
 
-  if (!mesh.lava_vertices.empty()) {
-    lava_vbo = upload_to_gpu_buffer(
-        device, mesh.lava_vertices.data(),
-        (uint32_t)(mesh.lava_vertices.size() * sizeof(GpuLavaVertex)),
-        SDL_GPU_BUFFERUSAGE_VERTEX);
+  uint8_t *mapped = (uint8_t *)SDL_MapGPUTransferBuffer(device, transfer, false);
+  if (!mapped) {
+    SDL_ReleaseGPUTransferBuffer(device, transfer);
+    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                 "TerrainRenderer::upload_mesh: Failed to map transfer buffer: %s", SDL_GetError());
+    return;
+  }
+
+  // Copy all sections into the staging buffer.
+  if (basalt_vbo_sz)  SDL_memcpy(mapped + off_basalt_vbo,  all_verts.data(),               basalt_vbo_sz);
+  if (basalt_ibo_sz)  SDL_memcpy(mapped + off_basalt_ibo,  all_indices.data(),              basalt_ibo_sz);
+  if (lava_vbo_sz)    SDL_memcpy(mapped + off_lava_vbo,    mesh.lava_vertices.data(),       lava_vbo_sz);
+  if (lava_ibo_sz)    SDL_memcpy(mapped + off_lava_ibo,    mesh.lava_indices.data(),        lava_ibo_sz);
+  if (contour_vbo_sz) SDL_memcpy(mapped + off_contour_vbo, mesh.contour_vertices.data(),    contour_vbo_sz);
+
+  SDL_UnmapGPUTransferBuffer(device, transfer);
+
+  // --- Create all GPU buffers ---
+
+  if (basalt_vbo_sz && basalt_ibo_sz) {
+    basalt_vbo = gpu_create_buffer(device, basalt_vbo_sz,  SDL_GPU_BUFFERUSAGE_VERTEX);
+    basalt_ibo = gpu_create_buffer(device, basalt_ibo_sz,  SDL_GPU_BUFFERUSAGE_INDEX);
+  }
+  if (lava_vbo_sz) {
+    lava_vbo          = gpu_create_buffer(device, lava_vbo_sz,    SDL_GPU_BUFFERUSAGE_VERTEX);
     lava_vertex_count = (uint32_t)mesh.lava_vertices.size();
-    if (asset_manager) asset_manager->register_buffer("lava_vbo", lava_vbo);
-
-    if (!mesh.lava_indices.empty()) {
-      lava_ibo = upload_to_gpu_buffer(
-          device, mesh.lava_indices.data(),
-          (uint32_t)(mesh.lava_indices.size() * sizeof(uint32_t)),
-          SDL_GPU_BUFFERUSAGE_INDEX);
-      lava_index_count = (uint32_t)mesh.lava_indices.size();
-      if (asset_manager) asset_manager->register_buffer("lava_ibo", lava_ibo);
-    }
+  }
+  if (lava_ibo_sz) {
+    lava_ibo          = gpu_create_buffer(device, lava_ibo_sz,    SDL_GPU_BUFFERUSAGE_INDEX);
+    lava_index_count  = (uint32_t)mesh.lava_indices.size();
+  }
+  if (contour_vbo_sz) {
+    contour_vbo          = gpu_create_buffer(device, contour_vbo_sz, SDL_GPU_BUFFERUSAGE_VERTEX);
+    contour_vertex_count = (uint32_t)mesh.contour_vertices.size();
   }
 
+  // --- One command buffer, one copy pass, all uploads ---
 
-  if (!mesh.contour_vertices.empty()) {
-    contour_vbo = upload_to_gpu_buffer(
-        device, mesh.contour_vertices.data(),
-        (uint32_t)(mesh.contour_vertices.size() * sizeof(ContourVertex)),
-        SDL_GPU_BUFFERUSAGE_VERTEX);
-    contour_vertex_count = (uint32_t)mesh.contour_vertices.size();
-    if (asset_manager) asset_manager->register_buffer("contour_vbo", contour_vbo);
+  SDL_GPUCommandBuffer *cmd  = SDL_AcquireGPUCommandBuffer(device);
+  SDL_GPUCopyPass      *copy = SDL_BeginGPUCopyPass(cmd);
+
+  auto upload = [&](SDL_GPUBuffer *buf, uint32_t offset, uint32_t size) {
+    if (!buf || size == 0) return;
+    SDL_GPUTransferBufferLocation src = { transfer, offset };
+    SDL_GPUBufferRegion           dst = { buf, 0, size };
+    SDL_UploadToGPUBuffer(copy, &src, &dst, false);
+  };
+
+  upload(basalt_vbo,  off_basalt_vbo,  basalt_vbo_sz);
+  upload(basalt_ibo,  off_basalt_ibo,  basalt_ibo_sz);
+  upload(lava_vbo,    off_lava_vbo,    lava_vbo_sz);
+  upload(lava_ibo,    off_lava_ibo,    lava_ibo_sz);
+  upload(contour_vbo, off_contour_vbo, contour_vbo_sz);
+
+  SDL_EndGPUCopyPass(copy);
+  SDL_SubmitGPUCommandBuffer(cmd);
+
+  // One final wait so the transfer buffer is safe to release.
+  SDL_WaitForGPUIdle(device);
+  SDL_ReleaseGPUTransferBuffer(device, transfer);
+
+  // --- Register buffers with asset manager ---
+
+  if (asset_manager) {
+    if (basalt_vbo)  asset_manager->register_buffer("basalt_vbo",  basalt_vbo);
+    if (basalt_ibo)  asset_manager->register_buffer("basalt_ibo",  basalt_ibo);
+    if (lava_vbo)    asset_manager->register_buffer("lava_vbo",    lava_vbo);
+    if (lava_ibo)    asset_manager->register_buffer("lava_ibo",    lava_ibo);
+    if (contour_vbo) asset_manager->register_buffer("contour_vbo", contour_vbo);
   }
 
   has_data = true;
-  SDL_Log("TerrainRenderer: Mesh uploaded (basalt=%u idx, lava=%u verts, %u idx, contour=%u)",
-          basalt_total_index_count, lava_vertex_count, lava_index_count, contour_vertex_count);
+  SDL_Log("TerrainRenderer: Mesh uploaded (basalt=%u idx, lava=%u verts/%u idx, contour=%u verts) staging=%u bytes",
+          basalt_total_index_count, lava_vertex_count, lava_index_count,
+          contour_vertex_count, total_sz);
 }
 
 
 
 
-void TerrainRenderer::upload_lights(const std::vector<GpuPointLight> &lights) {
+void TerrainRenderer::upload_lights(SDL_GPUCommandBuffer *cmd,
+                                     UploadManager &uploader,
+                                     const std::vector<GpuPointLight> &lights) {
   if (!point_light_ssbo || lights.empty()) {
     current_light_count = 0;
     return;
   }
 
-  uint32_t count = (uint32_t)std::min(lights.size(), (size_t)MAX_LIGHTS);
+  uint32_t count     = (uint32_t)std::min(lights.size(), (size_t)MAX_LIGHTS);
+  uint32_t byte_size = count * (uint32_t)sizeof(GpuPointLight);
 
-  SDL_GPUTransferBufferCreateInfo ti = {};
-  ti.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-  ti.size  = count * (uint32_t)sizeof(GpuPointLight);
-  SDL_GPUTransferBuffer *transfer = SDL_CreateGPUTransferBuffer(gpu_device, &ti);
-  if (!transfer) { current_light_count = 0; return; }
+  uint32_t offset = 0;
+  void *dst_ptr   = uploader.alloc(byte_size, &offset);
 
-  void *mapped = SDL_MapGPUTransferBuffer(gpu_device, transfer, false);
-  if (!mapped) {
+  if (!dst_ptr) {
+    // UploadManager overflow — fall back to a one-shot transfer buffer.
+    SDL_GPUTransferBufferCreateInfo ti = {};
+    ti.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    ti.size  = byte_size;
+    SDL_GPUTransferBuffer *transfer = SDL_CreateGPUTransferBuffer(gpu_device, &ti);
+    if (!transfer) { current_light_count = 0; return; }
+    void *mapped = SDL_MapGPUTransferBuffer(gpu_device, transfer, false);
+    if (!mapped) { SDL_ReleaseGPUTransferBuffer(gpu_device, transfer); current_light_count = 0; return; }
+    SDL_memcpy(mapped, lights.data(), byte_size);
+    SDL_UnmapGPUTransferBuffer(gpu_device, transfer);
+    SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(cmd);
+    SDL_GPUTransferBufferLocation src = { transfer, 0 };
+    SDL_GPUBufferRegion           dst_reg = { point_light_ssbo, 0, byte_size };
+    SDL_UploadToGPUBuffer(copy, &src, &dst_reg, false);
+    SDL_EndGPUCopyPass(copy);
     SDL_ReleaseGPUTransferBuffer(gpu_device, transfer);
-    current_light_count = 0;
-    return;
+  } else {
+    SDL_memcpy(dst_ptr, lights.data(), byte_size);
+    SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(cmd);
+    SDL_GPUTransferBufferLocation src = { uploader.buffer, offset };
+    SDL_GPUBufferRegion           dst_reg = { point_light_ssbo, 0, byte_size };
+    SDL_UploadToGPUBuffer(copy, &src, &dst_reg, false);
+    SDL_EndGPUCopyPass(copy);
   }
-  SDL_memcpy(mapped, lights.data(), count * sizeof(GpuPointLight));
-  SDL_UnmapGPUTransferBuffer(gpu_device, transfer);
 
-  SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(gpu_device);
-  SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(cmd);
-  SDL_GPUTransferBufferLocation src = { transfer, 0 };
-  SDL_GPUBufferRegion           dst = { point_light_ssbo, 0,
-                                        count * (uint32_t)sizeof(GpuPointLight) };
-  SDL_UploadToGPUBuffer(copy, &src, &dst, false);
-  SDL_EndGPUCopyPass(copy);
-  SDL_SubmitGPUCommandBuffer(cmd);
-
-  SDL_ReleaseGPUTransferBuffer(gpu_device, transfer);
   current_light_count = count;
   static bool logged_count = false;
   if (!logged_count && count > 0) {
@@ -790,8 +810,9 @@ void TerrainRenderer::stage_shaded_draw(SDL_GPURenderPass *pass,
     SDL_PushGPUVertexUniformData(cmd, 0, &uniforms, sizeof(uniforms));
     SDL_PushGPUFragmentUniformData(cmd, 0, &uniforms, sizeof(uniforms));
 
-    if (point_light_ssbo) {
-      SDL_BindGPUFragmentStorageBuffers(pass, 0, &point_light_ssbo, 1);
+    if (point_light_ssbo && light_grid_ssbo && global_index_ssbo) {
+      SDL_GPUBuffer *frag_storage[3] = { point_light_ssbo, light_grid_ssbo, global_index_ssbo };
+      SDL_BindGPUFragmentStorageBuffers(pass, 0, frag_storage, 3);
     }
 
     SDL_GPUBufferBinding vbind = { basalt_vbo, 0 };
@@ -829,10 +850,11 @@ void TerrainRenderer::draw(SDL_GPUCommandBuffer *cmd,
                             SDL_GPUTexture *swapchain,
                             uint32_t w, uint32_t h,
                             const SceneUniforms &uniforms,
-                            const std::vector<GpuPointLight> &lights) {
+                            const std::vector<GpuPointLight> &lights,
+                            UploadManager &uploader) {
   if (!initialized || !has_data) return;
 
-  upload_lights(lights);
+  upload_lights(cmd, uploader, lights);
   stage_cull_lights(cmd, uniforms, lights);
 
   SDL_GPURenderPass *pass = begin_render_pass_load(cmd, swapchain, w, h);

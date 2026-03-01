@@ -1,6 +1,7 @@
 #pragma once
 #include "terrain/terrain_mesh.h"
 #include "core/asset_manager.h"
+#include "gpu/gpu.h"
 #include <SDL3/SDL.h>
 #include <vector>
 
@@ -16,7 +17,8 @@ public:
             SDL_GPUTexture *swapchain,
             uint32_t w, uint32_t h,
             const SceneUniforms &uniforms,
-            const std::vector<GpuPointLight> &lights);
+            const std::vector<GpuPointLight> &lights,
+            UploadManager &uploader);
 
 
 
@@ -62,7 +64,9 @@ private:
 
   void release_buffers(SDL_GPUDevice *device);
   void release_cluster_buffers(SDL_GPUDevice *device);
-  void upload_lights(const std::vector<GpuPointLight> &lights);
+  void upload_lights(SDL_GPUCommandBuffer *cmd,
+                     UploadManager &uploader,
+                     const std::vector<GpuPointLight> &lights);
 
 
   bool initialized = false;

@@ -9,6 +9,7 @@
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <glm/glm.hpp>
+#include <algorithm>
 
 using json = nlohmann::json;
 
@@ -86,6 +87,8 @@ void TopoGame::on_init(GpuContext &gpu, flecs::world &ecs) {
   ecs.set<NoiseCache>({});
   ecs.set<ContourData>({});
 
+  task_system.init(1);
+
   input.init();
 
   const float half = Config::MAP_WIDTH_UNITS * 0.5f;
@@ -157,6 +160,35 @@ void TopoGame::on_render_tool(GpuContext &gpu, FrameContext &frame, flecs::world
   ui_draw(frame.cmd, frame.render_pass);
 }
 
+void TopoGame::on_pre_frame_game(GpuContext &gpu, flecs::world &ecs) {
+  if (!ready_mesh_pending || !terrain_renderer.is_initialized()) return;
+
+  // Called before gpu_acquire_game_frame — no frame command buffer is open.
+  // Safe to call SDL_WaitForGPUIdle inside upload_mesh here.
+  terrain_renderer.upload_mesh(gpu.device, *ready_mesh_pending);
+
+  auto *map_data = ecs.get_mut<MapData>();
+  auto *contours = ecs.get_mut<ContourData>();
+
+  if (map_data && ready_map_pending) {
+    // Free old data on the worker thread to avoid stalling the main thread.
+    auto old_map      = std::make_shared<MapData>(std::move(*map_data));
+    auto old_contours = std::make_shared<ContourData>(contours ? std::move(*contours) : ContourData{});
+    task_system.enqueue([old_map, old_contours]() {
+      (void)old_map;
+      (void)old_contours;
+    });
+
+    *map_data = std::move(*ready_map_pending);
+    if (contours && ready_contours_pending)
+      *contours = std::move(*ready_contours_pending);
+  }
+
+  ready_mesh_pending.reset();
+  ready_map_pending.reset();
+  ready_contours_pending.reset();
+}
+
 void TopoGame::on_render_game(GpuContext &gpu, FrameContext &frame, flecs::world &ecs) {
   if (!terrain_renderer.is_initialized()) {
     terrain_renderer.init(gpu.device, gpu.game_window, asset_manager);
@@ -180,36 +212,85 @@ void TopoGame::on_render_game(GpuContext &gpu, FrameContext &frame, flecs::world
   auto *cache    = ecs.get_mut<NoiseCache>();
   auto *contours = ecs.get_mut<ContourData>();
 
-  if (ts && ts->need_regenerate) {
-    SDL_Log("Starting GPU regeneration...");
-    auto start = SDL_GetTicks();
-
-    int w = Config::MAP_WIDTH;
-    int h = Config::MAP_HEIGHT;
-    elev->map_scale = ts->map_scale;
-
-    map_data->allocate(w, h);
-    compose_layers(*map_data, *elev, *river, *worley, *comp, cache);
-    map_data->columns = generate_basalt_columns_v2(*map_data, Config::HEX_SIZE);
-
-    auto fill_result = generate_lava_and_void(*map_data, comp->void_chance, worley->seed);
-    map_data->lava_bodies = std::move(fill_result.lava_bodies);
-    map_data->void_bodies = std::move(fill_result.void_bodies);
-
-    int n = w * h;
-    contours->heightmap.resize(n);
-    std::copy(map_data->basalt_height.begin(), map_data->basalt_height.end(),
-              contours->heightmap.begin());
-    contours->contour_lines.clear();
-    float contour_interval = 1.0f / comp->terrace_levels;
-    extract_contours(contours->heightmap, w, h, contour_interval,
-                     contours->contour_lines, contours->band_map);
-
-    TerrainMesh mesh = build_terrain_mesh(*ts, *map_data, *contours);
-    terrain_renderer.upload_mesh(gpu.device, mesh);
-
+  // Kick off async generation when needed and not already running.
+  if (ts && ts->need_regenerate && !async_terrain.is_generating) {
     ts->need_regenerate = false;
-    SDL_Log("GPU regeneration: %lu ms", (unsigned long)(SDL_GetTicks() - start));
+    async_terrain.is_generating = true;
+
+    // Snapshot all ECS params by value — worker thread must not touch ECS.
+    elev->map_scale = ts->map_scale;
+    auto elev_snap   = *elev;
+    auto river_snap  = *river;
+    auto worley_snap = *worley;
+    auto comp_snap   = *comp;
+
+    // Plain-data snapshot of TerrainState for use inside build_terrain_mesh.
+    struct TsSnap {
+      bool use_isometric;
+      int  current_palette;
+      float map_scale;
+      float contour_opacity;
+      bool need_regenerate;
+    };
+    TsSnap ts_snap { ts->use_isometric, ts->current_palette,
+                     ts->map_scale, ts->contour_opacity, false };
+
+    task_system.enqueue([this, elev_snap, river_snap, worley_snap, comp_snap, ts_snap]() {
+      SDL_Log("Async regen: started");
+      auto t0 = SDL_GetTicks();
+
+      auto md = std::make_shared<MapData>();
+      md->allocate(Config::MAP_WIDTH, Config::MAP_HEIGHT);
+
+      // NoiseCache is ECS-owned and not thread-safe — pass nullptr.
+      compose_layers(*md, elev_snap, river_snap, worley_snap, comp_snap, nullptr);
+      md->columns = generate_basalt_columns_v2(*md, Config::HEX_SIZE);
+
+      auto fill = generate_lava_and_void(*md, comp_snap.void_chance, worley_snap.seed);
+      md->lava_bodies = std::move(fill.lava_bodies);
+      md->void_bodies = std::move(fill.void_bodies);
+
+      auto cd = std::make_shared<ContourData>();
+      int n = Config::MAP_WIDTH * Config::MAP_HEIGHT;
+      cd->heightmap.resize(n);
+      std::copy(md->basalt_height.begin(), md->basalt_height.end(), cd->heightmap.begin());
+      float interval = 1.0f / comp_snap.terrace_levels;
+      extract_contours(cd->heightmap, Config::MAP_WIDTH, Config::MAP_HEIGHT,
+                       interval, cd->contour_lines, cd->band_map);
+      simplify_contours(cd->contour_lines, 0.5f);
+
+      // Reconstruct a TerrainState for build_terrain_mesh (reads only current_palette).
+      TerrainState ts_for_build;
+      ts_for_build.use_isometric   = ts_snap.use_isometric;
+      ts_for_build.current_palette = ts_snap.current_palette;
+      ts_for_build.map_scale       = ts_snap.map_scale;
+      ts_for_build.contour_opacity = ts_snap.contour_opacity;
+      ts_for_build.need_regenerate = false;
+
+      auto mesh = std::make_shared<TerrainMesh>(build_terrain_mesh(ts_for_build, *md, *cd));
+
+      // Hand off results to main thread under the pending_mtx lock.
+      {
+        std::lock_guard<std::mutex> lk(async_terrain.pending_mtx);
+        async_terrain.pending_mesh     = std::move(mesh);
+        async_terrain.pending_map      = std::move(md);
+        async_terrain.pending_contours = std::move(cd);
+      }
+      async_terrain.is_generating = false;
+
+      SDL_Log("Async regen: done in %llu ms", (unsigned long long)(SDL_GetTicks() - t0));
+    });
+  }
+
+  // Main thread: pull completed async results out from under the mutex.
+  // Do NOT call upload_mesh here — it calls SDL_WaitForGPUIdle which must not
+  // run while a frame command buffer is open. The actual upload happens in
+  // on_pre_frame_game, which is called before gpu_acquire_game_frame.
+  if (ts && !async_terrain.is_generating && !ready_mesh_pending) {
+    std::lock_guard<std::mutex> lk(async_terrain.pending_mtx);
+    ready_mesh_pending     = std::move(async_terrain.pending_mesh);
+    ready_map_pending      = std::move(async_terrain.pending_map);
+    ready_contours_pending = std::move(async_terrain.pending_contours);
   }
 
   float time = SDL_GetTicks() / 1000.0f;
@@ -264,13 +345,15 @@ void TopoGame::on_render_game(GpuContext &gpu, FrameContext &frame, flecs::world
 
     terrain_renderer.draw(frame.cmd, frame.swapchain,
                           frame.swapchain_w, frame.swapchain_h,
-                          uniforms, point_lights);
+                          uniforms, point_lights,
+                          gpu.upload_manager);
   }
 
   frame.render_pass = nullptr;
 }
 
 void TopoGame::on_cleanup(flecs::world &ecs) {
+  task_system.shutdown();
   terrain_renderer.cleanup(gpu_ctx.device);
   background_renderer.cleanup();
 }
@@ -320,27 +403,42 @@ void TopoGame::render_ui(flecs::world &ecs, bool game_window_open) {
 
   ImGui::Separator();
   ImGui::Text("Elevation");
-  ts->need_regenerate |= ImGui::SliderFloat("Frequency",   &elev->frequency,   0.001f, 0.05f);
-  ts->need_regenerate |= ImGui::SliderInt(  "Octaves",     &elev->octaves,     1, 8);
-  ts->need_regenerate |= ImGui::SliderFloat("Lacunarity",  &elev->lacunarity,  1.0f, 4.0f);
-  ts->need_regenerate |= ImGui::SliderFloat("Gain",        &elev->gain,        0.1f, 1.0f);
-  ts->need_regenerate |= ImGui::SliderInt(  "Seed",        &elev->seed,        0, 10000);
-  ts->need_regenerate |= ImGui::SliderInt(  "Terrace Levels", &comp->terrace_levels, 3, 20);
-  ts->need_regenerate |= ImGui::SliderInt(  "Min Region Size",&comp->min_region_size,50, 2000);
-  ts->need_regenerate |= ImGui::SliderFloat("S-Curve Bias",&elev->scurve_bias, 0.0f, 1.0f);
+  ImGui::SliderFloat("Frequency",   &elev->frequency,   0.001f, 0.05f);
+  ts->need_regenerate |= ImGui::IsItemDeactivatedAfterEdit();
+  ImGui::SliderInt(  "Octaves",     &elev->octaves,     1, 8);
+  ts->need_regenerate |= ImGui::IsItemDeactivatedAfterEdit();
+  ImGui::SliderFloat("Lacunarity",  &elev->lacunarity,  1.0f, 4.0f);
+  ts->need_regenerate |= ImGui::IsItemDeactivatedAfterEdit();
+  ImGui::SliderFloat("Gain",        &elev->gain,        0.1f, 1.0f);
+  ts->need_regenerate |= ImGui::IsItemDeactivatedAfterEdit();
+  ImGui::SliderInt(  "Seed",        &elev->seed,        0, 10000);
+  ts->need_regenerate |= ImGui::IsItemDeactivatedAfterEdit();
+  ImGui::SliderInt(  "Terrace Levels", &comp->terrace_levels, 3, 20);
+  ts->need_regenerate |= ImGui::IsItemDeactivatedAfterEdit();
+  ImGui::SliderInt(  "Min Region Size",&comp->min_region_size,50, 2000);
+  ts->need_regenerate |= ImGui::IsItemDeactivatedAfterEdit();
+  ImGui::SliderFloat("S-Curve Bias",&elev->scurve_bias, 0.0f, 1.0f);
+  ts->need_regenerate |= ImGui::IsItemDeactivatedAfterEdit();
 
   ImGui::Separator();
   ImGui::Text("Worley Noise");
-  ts->need_regenerate |= ImGui::SliderFloat("Worley Freq",  &worley->frequency,      0.001f, 0.1f);
-  ts->need_regenerate |= ImGui::SliderInt(  "Worley Seed",  &worley->seed,           0, 10000);
-  ts->need_regenerate |= ImGui::SliderFloat("Worley Jitter",&worley->jitter,         0.0f, 2.0f);
-  ts->need_regenerate |= ImGui::SliderFloat("Warp Amp",     &worley->warp_amp,       0.0f, 100.0f);
-  ts->need_regenerate |= ImGui::SliderFloat("Warp Freq",    &worley->warp_frequency, 0.001f, 0.02f);
-  ts->need_regenerate |= ImGui::SliderInt(  "Warp Octaves", &worley->warp_octaves,   1, 6);
+  ImGui::SliderFloat("Worley Freq",  &worley->frequency,      0.001f, 0.1f);
+  ts->need_regenerate |= ImGui::IsItemDeactivatedAfterEdit();
+  ImGui::SliderInt(  "Worley Seed",  &worley->seed,           0, 10000);
+  ts->need_regenerate |= ImGui::IsItemDeactivatedAfterEdit();
+  ImGui::SliderFloat("Worley Jitter",&worley->jitter,         0.0f, 2.0f);
+  ts->need_regenerate |= ImGui::IsItemDeactivatedAfterEdit();
+  ImGui::SliderFloat("Warp Amp",     &worley->warp_amp,       0.0f, 100.0f);
+  ts->need_regenerate |= ImGui::IsItemDeactivatedAfterEdit();
+  ImGui::SliderFloat("Warp Freq",    &worley->warp_frequency, 0.001f, 0.02f);
+  ts->need_regenerate |= ImGui::IsItemDeactivatedAfterEdit();
+  ImGui::SliderInt(  "Warp Octaves", &worley->warp_octaves,   1, 6);
+  ts->need_regenerate |= ImGui::IsItemDeactivatedAfterEdit();
 
   ImGui::Separator();
   ImGui::Text("Composition");
-  ts->need_regenerate |= ImGui::SliderFloat("Void Chance", &comp->void_chance, 0.0f, 1.0f);
+  ImGui::SliderFloat("Void Chance", &comp->void_chance, 0.0f, 1.0f);
+  ts->need_regenerate |= ImGui::IsItemDeactivatedAfterEdit();
 
   ImGui::Separator();
   ImGui::Text("Contour Lines");
@@ -363,7 +461,8 @@ void TopoGame::render_ui(flecs::world &ecs, bool game_window_open) {
 
   ImGui::Separator();
   ImGui::Text("Map Scale");
-  ts->need_regenerate |= ImGui::SliderFloat("Map Scale", &ts->map_scale, 0.25f, 4.0f);
+  ImGui::SliderFloat("Map Scale", &ts->map_scale, 0.25f, 4.0f);
+  ts->need_regenerate |= ImGui::IsItemDeactivatedAfterEdit();
 
   ImGui::Separator();
   if (ImGui::Button("Regenerate", {-1, 40})) ts->need_regenerate = true;

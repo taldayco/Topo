@@ -41,6 +41,17 @@ IMORTANT:
           - `CameraMatrices build_matrices(const CameraState &cam, float aspect) const`
           - `struct CameraMatrices` — glm::mat4 view, projection
       - core/
+        - task_system.h
+          - `void TaskSystem::init(int num_threads)` — spawn std::thread pool
+          - `void TaskSystem::shutdown()` — signal stop, join all threads
+          - `void TaskSystem::enqueue(std::function<void()> task)` — push onto deque
+          - `bool TaskSystem::is_idle() const` — true when queue empty and no threads active
+        - task_system.cpp
+          - `void TaskSystem::init(int num_threads)`
+          - `void TaskSystem::shutdown()`
+          - `void TaskSystem::enqueue(std::function<void()> task)`
+          - `bool TaskSystem::is_idle() const`
+          - `void TaskSystem::worker_loop()` — internal thread body
         - asset_manager.h
           - `struct ShaderAsset` — shader, path, last_mtime, stage, num_uniform_buffers, num_storage_buffers, num_sampler_textures, dirty
           - `struct PipelineRecord` — vert_shader_key, frag_shader_key, needs_rebuild
@@ -80,18 +91,27 @@ IMORTANT:
         - types.h
       - gpu/
         - gpu.cpp
-          - `bool gpu_init(GpuContext &ctx)`
+          - `void UploadManager::init(SDL_GPUDevice *device, uint32_t size)`
+          - `void UploadManager::cleanup(SDL_GPUDevice *device)`
+          - `void *UploadManager::alloc(uint32_t size, uint32_t *out_offset)` — 256-byte aligned linear alloc from persistent staging buffer
+          - `void UploadManager::reset()` — reset cursor to 0, call once per frame
+          - `bool gpu_init(GpuContext &ctx)` — initializes UploadManager with 8MB
           - `bool gpu_create_game_window(GpuContext &ctx)`
           - `void gpu_destroy_game_window(GpuContext &ctx)`
           - `bool gpu_acquire_frame(GpuContext &ctx, FrameContext &frame)`
-          - `bool gpu_acquire_game_frame(GpuContext &ctx, FrameContext &frame)`
+          - `bool gpu_acquire_game_frame(GpuContext &ctx, FrameContext &frame)` — calls upload_manager.reset()
           - `bool gpu_begin_render_pass(GpuContext &ctx, FrameContext &frame)`
           - `void gpu_end_frame(FrameContext &frame)`
           - `void gpu_blit_texture(FrameContext &frame, const TextureHandle &tex, const ViewState &view)`
-          - `void gpu_cleanup(GpuContext &ctx)`
+          - `void gpu_cleanup(GpuContext &ctx)` — calls upload_manager.cleanup()
           - `void release_texture(SDL_GPUDevice *device, const TextureHandle &handle)`
           - `TextureHandle upload_pixels_to_texture(SDL_GPUDevice *device, const uint32_t *pixels, int width, int height)`
+          - `SDL_GPUBuffer *gpu_create_buffer(SDL_GPUDevice *device, uint32_t size, SDL_GPUBufferUsageFlags usage)`
+          - `SDL_GPUBuffer *gpu_upload_buffer(SDL_GPUDevice *device, const void *data, uint32_t size, SDL_GPUBufferUsageFlags usage)` — creates buffer, uploads via transfer, waits for idle
+          - `SDL_GPUBuffer *gpu_create_zeroed_buffer(SDL_GPUDevice *device, uint32_t size, SDL_GPUBufferUsageFlags usage)` — zero-filled via gpu_upload_buffer
         - gpu.h
+          - `struct UploadManager` — persistent mapped staging buffer; fields: buffer, mapped, capacity, cursor
+          - `struct GpuContext` — window, game_window, device, upload_manager (UploadManager)
           - `bool gpu_init(GpuContext &ctx)`
           - `bool gpu_create_game_window(GpuContext &ctx)`
           - `void gpu_destroy_game_window(GpuContext &ctx)`
@@ -103,6 +123,9 @@ IMORTANT:
           - `void gpu_cleanup(GpuContext &ctx)`
           - `void release_texture(SDL_GPUDevice *device, const TextureHandle &handle)`
           - `TextureHandle upload_pixels_to_texture(SDL_GPUDevice *device, const uint32_t *pixels, int width, int height)`
+          - `SDL_GPUBuffer *gpu_create_buffer(SDL_GPUDevice *device, uint32_t size, SDL_GPUBufferUsageFlags usage)`
+          - `SDL_GPUBuffer *gpu_upload_buffer(SDL_GPUDevice *device, const void *data, uint32_t size, SDL_GPUBufferUsageFlags usage)`
+          - `SDL_GPUBuffer *gpu_create_zeroed_buffer(SDL_GPUDevice *device, uint32_t size, SDL_GPUBufferUsageFlags usage)`
       - input/
         - input.cpp
           - `void InputSystem::init()`
@@ -161,22 +184,27 @@ IMORTANT:
     - game/
       - config.h
       - game_state.h
+        - `struct TerrainState` — use_isometric, current_palette, map_scale, contour_opacity, need_regenerate (plain ECS component, copyable)
+        - `struct AsyncTerrainState` — is_generating (atomic), pending_mesh/map/contours (shared_ptr), pending_mtx (mutex); NOT a flecs component, owned by TopoGame
+        - `struct GamePhase`, `struct WindowState`, `struct PointLightComponent`, `struct ContourData`
       - main.cpp
         - `int main()`
       - topo_game.cpp
         - `static json params_to_json(const ElevationParams &elev, const WorleyParams &worley, const CompositionParams &comp, const TerrainState &ts)`
         - `static void json_to_params(const json &j, ElevationParams &elev, WorleyParams &worley, CompositionParams &comp, TerrainState &ts)`
-        - `void TopoGame::on_init(GpuContext &gpu, flecs::world &ecs)`
+        - `void TopoGame::on_init(GpuContext &gpu, flecs::world &ecs)` — calls task_system.init(1)
         - `void TopoGame::on_event(const SDL_Event &event, flecs::world &ecs)`
         - `void TopoGame::on_render_tool(GpuContext &gpu, FrameContext &frame, flecs::world &ecs)`
-        - `void TopoGame::on_render_game(GpuContext &gpu, FrameContext &frame, flecs::world &ecs)`
-        - `void TopoGame::on_cleanup(flecs::world &ecs)`
+        - `void TopoGame::on_render_game(GpuContext &gpu, FrameContext &frame, flecs::world &ecs)` — async regen: kicks worker via task_system.enqueue; polls async_terrain for completed results; calls terrain_renderer.draw(..., gpu.upload_manager)
+        - `void TopoGame::on_cleanup(flecs::world &ecs)` — calls task_system.shutdown() before terrain_renderer.cleanup()
         - `bool TopoGame::wants_game_window_open(flecs::world &ecs)`
         - `bool TopoGame::wants_game_window_close(flecs::world &ecs)`
         - `void TopoGame::render_ui(flecs::world &ecs, bool game_window_open)`
         - `std::ofstream f("config.json")`
         - `std::ifstream f("config.json")`
       - topo_game.h
+        - `TaskSystem task_system` — member; init(1) in on_init, shutdown() in on_cleanup before terrain_renderer.cleanup()
+        - `AsyncTerrainState async_terrain` — member; holds is_generating, pending_mesh/map/contours, pending_mtx
         - `private: void render_ui(flecs::world &ecs, bool game_window_open)`
       - terrain/
         - FastNoiseLite.h
@@ -273,10 +301,12 @@ IMORTANT:
           - `inline void apply_hex_dither(std::vector<uint32_t> &pixels, int width, int height, float strength, uint32_t skip_color = 0)`
         - contour.cpp
           - `void extract_contours(std::span<const float> heightmap, int width, int height, float interval, std::vector<Line> &out_lines, std::vector<int> &out_band_map)`
+          - `void simplify_contours(std::vector<Line> &lines, float epsilon)` — erases degenerate segments via std::remove_if on squared length
           - `std::vector<Plateau> detect_plateaus(std::span<const int> band_map, std::span<const float> heightmap, int width, int height, std::vector<int16_t>& terrain_map)`
           - `std::vector<bool> visited(width * height, false)`
         - contour.h
           - `void extract_contours(std::span<const float> heightmap, int width, int height, float interval, std::vector<Line> &out_lines, std::vector<int> &out_band_map)`
+          - `void simplify_contours(std::vector<Line> &lines, float epsilon)` — removes segments shorter than epsilon (world units); called after extract_contours in async regen lambda
           - `std::vector<Plateau> detect_plateaus(std::span<const int> band_map, std::span<const float> heightmap, int width, int height, std::vector<int16_t>& terrain_map)`
         - delve_render.cpp
           - `static void draw_line_soft(std::vector<uint32_t> &pixels, int width, int height, float x0, float y0, float x1, float y1, uint32_t color)`
@@ -425,29 +455,26 @@ IMORTANT:
           - `struct GpuLavaVertex` — pos_x/y/z, time_offset
           - `struct ContourVertex` — pos_x/y/z
         - terrain_renderer.cpp
-          - `static SDL_GPUComputePipeline *build_compute_pipeline(SDL_GPUDevice *device, const char *path, int num_uniform_buffers, int num_rw_storage_buffers, int num_ro_storage_buffers)`
-          - `static SDL_GPUBuffer *create_gpu_buffer(SDL_GPUDevice *device, uint32_t size, SDL_GPUBufferUsageFlags usage)`
-          - `static SDL_GPUBuffer *upload_to_gpu_buffer(SDL_GPUDevice *device, const void *data, uint32_t size, SDL_GPUBufferUsageFlags usage)`
-          - `static SDL_GPUBuffer *create_zeroed_gpu_buffer(SDL_GPUDevice *device, uint32_t size, SDL_GPUBufferUsageFlags usage)`
+          - `static SDL_GPUComputePipeline *build_compute_pipeline(SDL_GPUDevice *device, const char *path, int num_uniform_buffers, int num_rw_storage_buffers, int num_ro_storage_buffers)` — NOTE: buffer helpers (create_gpu_buffer, upload_to_gpu_buffer, create_zeroed_gpu_buffer) removed; use gpu.h free functions instead
           - `void TerrainRenderer::init(SDL_GPUDevice *device, SDL_Window *window, AssetManager &am)`
-          - `void TerrainRenderer::init_graphics_pipelines(SDL_GPUDevice *device, SDL_Window *window)`
+          - `void TerrainRenderer::init_graphics_pipelines(SDL_GPUDevice *device, SDL_Window *window)` — terrain.frag registered with num_storage_buffers=3 (point_light, light_grid, global_index)
           - `void TerrainRenderer::init_compute_pipelines(SDL_GPUDevice *device)`
-          - `void TerrainRenderer::rebuild_dirty_pipelines(SDL_Window *window)`
+          - `void TerrainRenderer::rebuild_dirty_pipelines(SDL_Window *window)` — terrain.frag rebuild also uses num_storage_buffers=3
           - `void TerrainRenderer::init_cluster_buffers(SDL_GPUDevice *device, uint32_t tilesX, uint32_t tilesY, uint32_t num_slices)`
-          - `void TerrainRenderer::upload_mesh(SDL_GPUDevice *device, const TerrainMesh &mesh)`
-          - `void TerrainRenderer::upload_lights(const std::vector<GpuPointLight> &lights)`
+          - `void TerrainRenderer::upload_mesh(SDL_GPUDevice *device, const TerrainMesh &mesh)` — uses gpu_upload_buffer / gpu_create_buffer from gpu.h
+          - `void TerrainRenderer::upload_lights(SDL_GPUCommandBuffer *cmd, UploadManager &uploader, const std::vector<GpuPointLight> &lights)` — uses UploadManager for zero-alloc per-frame upload; falls back to one-shot transfer on overflow
           - `void TerrainRenderer::rebuild_clusters_if_needed(SDL_GPUCommandBuffer *cmd, uint32_t w, uint32_t h, float tile_px, uint32_t num_slices, float near_plane, float far_plane)`
-          - `void TerrainRenderer::stage_geometry(SDL_GPURenderPass *pass, SDL_GPUCommandBuffer *cmd, const SceneUniforms &uniforms)`
+          - `void TerrainRenderer::stage_geometry(SDL_GPURenderPass *pass, SDL_GPUCommandBuffer *cmd, const SceneUniforms &uniforms)` — dead code (not called from draw); binds all 3 storage buffers correctly
           - `void TerrainRenderer::stage_cull_lights(SDL_GPUCommandBuffer *cmd, const SceneUniforms &u, const std::vector<GpuPointLight> &lights)`
-          - `void TerrainRenderer::stage_shaded_draw(SDL_GPURenderPass *pass, SDL_GPUCommandBuffer *cmd, const SceneUniforms &uniforms)`
-          - `void TerrainRenderer::draw(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, uint32_t w, uint32_t h, const SceneUniforms &uniforms, const std::vector<GpuPointLight> &lights)`
+          - `void TerrainRenderer::stage_shaded_draw(SDL_GPURenderPass *pass, SDL_GPUCommandBuffer *cmd, const SceneUniforms &uniforms)` — now binds all 3 fragment storage buffers: point_light_ssbo, light_grid_ssbo, global_index_ssbo
+          - `void TerrainRenderer::draw(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, uint32_t w, uint32_t h, const SceneUniforms &uniforms, const std::vector<GpuPointLight> &lights, UploadManager &uploader)`
           - `void TerrainRenderer::release_buffers(SDL_GPUDevice *device)`
           - `void TerrainRenderer::release_cluster_buffers(SDL_GPUDevice *device)`
           - `void TerrainRenderer::cleanup(SDL_GPUDevice *device)`
         - terrain_renderer.h
           - `public: void init(SDL_GPUDevice *device, SDL_Window *window, AssetManager &am)`
           - `void upload_mesh(SDL_GPUDevice *device, const TerrainMesh &mesh)`
-          - `void draw(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, uint32_t w, uint32_t h, const SceneUniforms &uniforms, const std::vector<GpuPointLight> &lights)`
+          - `void draw(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, uint32_t w, uint32_t h, const SceneUniforms &uniforms, const std::vector<GpuPointLight> &lights, UploadManager &uploader)` — includes gpu/gpu.h for UploadManager
           - `void rebuild_clusters_if_needed(SDL_GPUCommandBuffer *cmd, uint32_t w, uint32_t h, float tile_px, uint32_t num_slices, float near_plane, float far_plane)`
           - `void rebuild_dirty_pipelines(SDL_Window *window)`
           - `SDL_GPURenderPass *begin_render_pass(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, uint32_t w, uint32_t h)`
@@ -461,12 +488,12 @@ IMORTANT:
           - `private: void init_graphics_pipelines(SDL_GPUDevice *device, SDL_Window *window)`
           - `void init_compute_pipelines(SDL_GPUDevice *device)`
           - `void init_cluster_buffers(SDL_GPUDevice *device, uint32_t tilesX, uint32_t tilesY, uint32_t num_slices)`
-          - `void stage_geometry(SDL_GPURenderPass *pass, SDL_GPUCommandBuffer *cmd, const SceneUniforms &uniforms)`
+          - `void stage_geometry(SDL_GPURenderPass *pass, SDL_GPUCommandBuffer *cmd, const SceneUniforms &uniforms)` — dead code, not called from draw()
           - `void stage_cull_lights(SDL_GPUCommandBuffer *cmd, const SceneUniforms &uniforms, const std::vector<GpuPointLight> &lights)`
           - `void stage_shaded_draw(SDL_GPURenderPass *pass, SDL_GPUCommandBuffer *cmd, const SceneUniforms &uniforms)`
           - `void release_buffers(SDL_GPUDevice *device)`
           - `void release_cluster_buffers(SDL_GPUDevice *device)`
-          - `void upload_lights(const std::vector<GpuPointLight> &lights)`
+          - `void upload_lights(SDL_GPUCommandBuffer *cmd, UploadManager &uploader, const std::vector<GpuPointLight> &lights)`
           - `AssetManager *asset_manager` — field
         - util.h
           - `inline uint32_t hash2d(int x, int y)`

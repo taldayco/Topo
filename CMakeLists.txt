@@ -116,6 +116,7 @@ add_custom_target(shaders DEPENDS ${SHADER_OUTPUTS})
 add_library(topo_engine STATIC
     src/engine/app.cpp
     src/engine/core/asset_manager.cpp
+    src/engine/core/task_system.cpp
     src/engine/gpu/gpu.cpp
     src/engine/input/input.cpp
     src/engine/camera/camera.cpp

@@ -74,6 +74,7 @@ int Application::run() {
 
 
     if (gpu_ctx.game_window) {
+      on_pre_frame_game(gpu_ctx, ecs_world);
       FrameContext game_frame;
       if (gpu_acquire_game_frame(gpu_ctx, game_frame)) {
         on_render_game(gpu_ctx, game_frame, ecs_world);
